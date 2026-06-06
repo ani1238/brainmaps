@@ -155,24 +155,39 @@ function SharpenContent() {
   const [apiResult, setApiResult] = useState<SessionResult | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Re-run whenever the student moves to a different level or concept
   useEffect(() => {
-    if (!isLiveConcept(concept?.id ?? '') || !level) return;
+    // 1. Reset all per-session state so the new level starts fresh
+    setCurrentIdx(0);
+    setFinished(false);
+    setCorrectCount(0);
+    setMcqCount(0);
+    collectedAnswers.current = [];
+    setApiResult(null);
+    sessionIdRef.current = null;
+    if (pollRef.current) clearInterval(pollRef.current);
 
-    // 1. Fetch questions from the API — if the concept is seeded, use those IDs
-    fetchQuestions(concept!.id, level)
+    // 2. Show local questions immediately as a fallback (prevents blank screen)
+    const all = CONCEPT_QUESTIONS[conceptId] ?? SESSION_QUESTIONS;
+    setQuestions(level ? (splitStations(all)[level] ?? []) : all);
+    setQuestionsFromApi(false);
+
+    if (!isLiveConcept(conceptId) || !level) return;
+
+    // 3. Fetch real DB questions, then start a fresh session
+    fetchQuestions(conceptId, level)
       .then(apiQs => {
         if (apiQs.length > 0) {
           setQuestions(apiQs);
           setQuestionsFromApi(true);
-          // 2. Start session only once we know real question IDs exist
-          return startSession(concept!.id, level);
+          return startSession(conceptId, level);
         }
-        return null; // not seeded yet — stay on local dummy, no API session
+        return null;
       })
       .then(id => { if (id) sessionIdRef.current = id; })
-      .catch(() => {}); // all failures are silent — local fallback still works
+      .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [conceptId, level]);
 
   // Stop polling on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
