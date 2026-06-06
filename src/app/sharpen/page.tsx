@@ -108,6 +108,14 @@ const LEVEL_TO_STATION_LABEL: Record<QuestionLevel, string> = {
   revise: STATION_LABELS.keep_it_fresh,
 };
 
+// Station progression order
+const NEXT_LEVEL: Partial<Record<QuestionLevel, QuestionLevel>> = {
+  level1: 'level2',
+  level2: 'level3',
+  level3: 'strengthen',
+  strengthen: 'revise',
+};
+
 function SharpenContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -241,6 +249,10 @@ function SharpenContent() {
     const pct = Math.round(sessionScore * 100);
     const aiStillGrading = apiResult?.aiGrading ?? false;
 
+    // Next station after the current one (undefined if this was the last)
+    const nextLevel = level ? NEXT_LEVEL[level] : undefined;
+    const nextLabel = nextLevel ? LEVEL_TO_STATION_LABEL[nextLevel] : null;
+
     return (
       <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
         <GridBackground />
@@ -312,15 +324,27 @@ function SharpenContent() {
             )}
 
             <div className="flex flex-col gap-3">
-              {!aiStillGrading && passed && (
+              {/* Passed + next level exists → go to next station */}
+              {!aiStillGrading && passed && nextLevel && (
                 <button
-                  onClick={() => router.push(`/recall?conceptId=${concept?.id}`)}
+                  onClick={() => router.push(`/sharpen?conceptId=${concept?.id}&level=${nextLevel}`)}
                   className="px-6 py-3 rounded-xl font-bold text-sm text-white"
                   style={{ background: COLORS.strong }}
                 >
-                  🎯 Try the real-world test
+                  → Continue to {nextLabel}
                 </button>
               )}
+              {/* Passed + no next level → all stations done, back to map */}
+              {!aiStillGrading && passed && !nextLevel && (
+                <button
+                  onClick={() => router.push(backToMapHref)}
+                  className="px-6 py-3 rounded-xl font-bold text-sm text-white"
+                  style={{ background: COLORS.strong }}
+                >
+                  🎉 Concept complete — Back to Brain Map
+                </button>
+              )}
+              {/* Failed → retry this level */}
               {!aiStillGrading && !passed && (
                 <button
                   onClick={handleRetry}
