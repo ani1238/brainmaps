@@ -494,6 +494,15 @@ function SharpenContent() {
   );
 }
 
+// Reads the URL params and passes a key to SharpenContent so it fully
+// remounts whenever the concept or level changes — no stale state bleeds
+// between stations.
+function SharpenKeyBridge() {
+  const params = useSearchParams();
+  const key = `${params.get('conceptId') ?? 'c104'}_${params.get('level') ?? 'none'}`;
+  return <SharpenContent key={key} />;
+}
+
 export default function SharpenPage() {
   return (
     <Suspense fallback={
@@ -501,7 +510,7 @@ export default function SharpenPage() {
         <div className="text-sm" style={{ color: '#78716c' }}>Loading…</div>
       </div>
     }>
-      <SharpenContent />
+      <SharpenKeyBridge />
     </Suspense>
   );
 }
