@@ -168,53 +168,65 @@ func callGemini(ctx context.Context, qType, conceptName, question, answer string
 func buildPrompt(qType, conceptName, question, answer string, keyConcepts []string, rubricHint *string) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are grading a Class 6 Indian student's answer for the BrainMaps learning app.\n\n")
-	sb.WriteString("Concept: " + conceptName + "\n")
+	// ── Grader identity + curriculum context ─────────────────────────────────
+	sb.WriteString("You are an expert grader for BrainMaps, an AI-powered learning app for Indian school students.\n\n")
+	sb.WriteString("CURRICULUM CONTEXT:\n")
+	sb.WriteString("- Board: CBSE (Central Board of Secondary Education), India\n")
+	sb.WriteString("- Class: 6 (approx. age 11–12)\n")
+	sb.WriteString("- Subject: Social Science — History strand\n")
+	sb.WriteString("- Textbook: NCERT \"Our Pasts – Part I\" (Class VI History)\n")
+	sb.WriteString("- Chapter theme: Tapestry of the Past — ancient Indian history, sources, names, texts, science, trade, and kingdoms\n")
+	sb.WriteString("- Expected language level: simple English sentences; basic vocabulary; no jargon required\n")
+	sb.WriteString("- Expected knowledge depth: Class 6 NCERT level — broad conceptual understanding, not specialist detail\n\n")
+
+	// ── Question context ──────────────────────────────────────────────────────
+	sb.WriteString("QUESTION CONTEXT:\n")
+	sb.WriteString("Concept being tested: " + conceptName + "\n")
 	sb.WriteString("Question type: " + qType + "\n")
 	sb.WriteString("Question: " + question + "\n")
 
 	if len(keyConcepts) > 0 {
-		sb.WriteString("Key concepts that should be covered: " + strings.Join(keyConcepts, "; ") + "\n")
+		sb.WriteString("Key ideas the answer should cover: " + strings.Join(keyConcepts, "; ") + "\n")
 	}
 	if rubricHint != nil && *rubricHint != "" {
-		sb.WriteString("Grading rubric: " + *rubricHint + "\n")
+		sb.WriteString("Marking guide (NCERT-aligned): " + *rubricHint + "\n")
 	}
 
-	sb.WriteString("Student's answer: " + answer + "\n\n")
+	sb.WriteString("\nSTUDENT'S ANSWER:\n" + answer + "\n\n")
 
+	// ── Scoring rubric per question type ──────────────────────────────────────
+	sb.WriteString("SCORING RUBRIC (0.0–1.0) for a Class 6 CBSE student:\n")
 	switch qType {
 	case "DESCRIPTIVE":
-		sb.WriteString("Score criteria (0.0–1.0):\n")
-		sb.WriteString("- 0.8–1.0: answers all parts of the question accurately and completely\n")
-		sb.WriteString("- 0.5–0.8: mostly correct but missing one key part or detail\n")
-		sb.WriteString("- 0.2–0.5: partially correct — some right points but major gaps\n")
-		sb.WriteString("- 0.0–0.2: incorrect or does not address the question\n")
+		sb.WriteString("- 0.8–1.0: correctly answers all parts of the question at Class 6 NCERT level; uses appropriate terms\n")
+		sb.WriteString("- 0.5–0.8: mostly correct but missing one key NCERT fact or detail\n")
+		sb.WriteString("- 0.2–0.5: partially correct — gets the gist but has significant gaps or errors\n")
+		sb.WriteString("- 0.0–0.2: off-topic, fundamentally wrong, or just restates the question\n")
 	case "FEYNMAN":
-		sb.WriteString("Score criteria (0.0–1.0):\n")
-		sb.WriteString("- 0.8–1.0: covers all key concepts clearly and simply, like explaining to a friend\n")
-		sb.WriteString("- 0.5–0.8: covers most key concepts but unclear or incomplete\n")
-		sb.WriteString("- 0.2–0.5: partially correct but missing major ideas\n")
-		sb.WriteString("- 0.0–0.2: off-topic or fundamentally wrong\n")
+		sb.WriteString("- 0.8–1.0: explains the concept in simple, clear words; covers all key NCERT ideas as if teaching a younger child\n")
+		sb.WriteString("- 0.5–0.8: explains most key ideas but is unclear or incomplete in places\n")
+		sb.WriteString("- 0.2–0.5: touches on the concept but misses major ideas or is confusing\n")
+		sb.WriteString("- 0.0–0.2: explanation is wrong, off-topic, or just copies the question back\n")
 	case "BLURT":
-		sb.WriteString("Score criteria (0.0–1.0):\n")
-		sb.WriteString("- 0.8–1.0: comprehensive brain-dump covering most key facts about the topic\n")
-		sb.WriteString("- 0.5–0.8: good recall but missing some important points\n")
-		sb.WriteString("- 0.2–0.5: partial recall — only a few facts mentioned\n")
-		sb.WriteString("- 0.0–0.2: almost nothing relevant recalled\n")
+		sb.WriteString("- 0.8–1.0: recalls most key NCERT facts about the topic from memory; good coverage\n")
+		sb.WriteString("- 0.5–0.8: recalls several correct points but misses some important NCERT content\n")
+		sb.WriteString("- 0.2–0.5: only recalls a few scattered points; significant gaps\n")
+		sb.WriteString("- 0.0–0.2: recalls almost nothing relevant, or writes something unrelated\n")
 	case "ACTIVE_RECALL":
-		sb.WriteString("Score criteria (0.0–1.0):\n")
-		sb.WriteString("- 0.8–1.0: correctly applies concept to the scenario with clear reasoning\n")
-		sb.WriteString("- 0.5–0.8: partial application — correct direction but incomplete\n")
-		sb.WriteString("- 0.2–0.5: shows some understanding but mostly misapplied\n")
-		sb.WriteString("- 0.0–0.2: does not apply the concept at all\n")
+		sb.WriteString("- 0.8–1.0: correctly applies the NCERT concept to the new scenario with clear reasoning\n")
+		sb.WriteString("- 0.5–0.8: applies the concept in the right direction but reasoning is incomplete\n")
+		sb.WriteString("- 0.2–0.5: shows partial understanding but mostly misapplies or confuses the concept\n")
+		sb.WriteString("- 0.0–0.2: does not apply the concept; answer is generic or irrelevant\n")
 	}
 
-	sb.WriteString("\nWrite feedback for a 12-year-old in exactly 3 short sentences:\n")
-	sb.WriteString("1. What they got right (start with something positive, even if small).\n")
-	sb.WriteString("2. What was missing or wrong — be specific, name the exact concept or fact.\n")
-	sb.WriteString("3. One concrete thing to remember or do differently next time.\n")
-	sb.WriteString("Keep each sentence under 20 words. Be warm and encouraging, not harsh.\n")
-	sb.WriteString(`Return ONLY valid JSON: {"score": 0.XX, "feedback": "sentence1 sentence2 sentence3"}`)
+	// ── Feedback instructions ─────────────────────────────────────────────────
+	sb.WriteString("\nFEEDBACK INSTRUCTIONS:\n")
+	sb.WriteString("Write exactly 3 short sentences addressed directly to the student:\n")
+	sb.WriteString("1. Acknowledge something they got right (be specific, name the idea — even if small).\n")
+	sb.WriteString("2. Point out exactly what NCERT concept or fact was missing or wrong — name it explicitly.\n")
+	sb.WriteString("3. Give one clear, actionable tip for next time (what to remember or how to improve).\n")
+	sb.WriteString("Rules: each sentence ≤ 20 words; tone is warm and encouraging; use simple Class 6 language; no bullet points in feedback.\n\n")
+	sb.WriteString(`Return ONLY valid JSON (no markdown, no extra text): {"score": 0.XX, "feedback": "sentence1 sentence2 sentence3"}`)
 
 	return sb.String()
 }
