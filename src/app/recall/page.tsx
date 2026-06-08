@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { GridBackground } from '@/components/GridBackground';
 import { LeftRail } from '@/components/LeftRail';
 import { QuestionScreen } from '@/components/QuestionScreen';
-import { COLORS, SUBJECTS } from '@/lib/tokens';
+import { COLORS, subjectDisplay } from '@/lib/tokens';
 import { RECALL_QUESTIONS, RECALL_CONCEPT_INFO as QUEUE_INFO, CONCEPT_BY_ID, CONCEPT_RECALL_IDX, CHAPTER_DATA } from '@/data/dummy';
 import { fetchConcept, fetchQuestions, type ApiConceptDetail } from '@/lib/api';
 import type { Question } from '@/types';
@@ -58,7 +58,7 @@ function SingleConceptRecall({ conceptId }: { conceptId: string }) {
   // ── Display fields: prefer the live DB concept, then local demo data ──────
   const conceptName = apiConcept?.name ?? localConcept?.name ?? 'this concept';
   const subjectKey  = apiConcept?.subjectKey ?? localConcept?.subjectKey ?? 'science';
-  const subject     = SUBJECTS.find(s => s.key === subjectKey);
+  const subject     = subjectDisplay(subjectKey);
   const chapterName = apiConcept?.chapterName
     ?? CHAPTER_DATA[localConcept?.subjectKey ?? '']?.find(ch => ch.id === localConcept?.chapterId)?.name
     ?? 'Chapter';
@@ -118,8 +118,8 @@ function SingleConceptRecall({ conceptId }: { conceptId: string }) {
           }}
         >
           <div>
-            <div className="text-xs font-bold mb-1" style={{ color: subject?.color ?? COLORS.science }}>
-              {subject?.label ?? 'Science'} · Test yourself 🎯
+            <div className="text-xs font-bold mb-1" style={{ color: subject.color }}>
+              {subject.label} · Test yourself 🎯
             </div>
             <h2 className="text-xl font-extrabold mb-3" style={{ color: '#1c1917' }}>{conceptName}</h2>
 
@@ -157,8 +157,8 @@ function SingleConceptRecall({ conceptId }: { conceptId: string }) {
               question={question}
               conceptName={conceptName}
               chapterName="Active Recall · Step 2"
-              subjectName={subject?.label ?? 'Science'}
-              subjectColor={subject?.color ?? COLORS.science}
+              subjectName={subject.label}
+              subjectColor={subject.color}
               current={0}
               total={1}
               onNext={() => setFinished(true)}

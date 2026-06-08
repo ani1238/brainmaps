@@ -6,7 +6,7 @@ import { GridBackground } from '@/components/GridBackground';
 import { LeftRail } from '@/components/LeftRail';
 import { QuestionScreen } from '@/components/QuestionScreen';
 import type { AnswerPayload } from '@/components/QuestionScreen';
-import { COLORS, SUBJECTS, MASTERY_MAP } from '@/lib/tokens';
+import { COLORS, subjectDisplay, MASTERY_MAP } from '@/lib/tokens';
 import { CHAPTER_DATA, CONCEPT_BY_ID, CONCEPT_DETAILS, DEFAULT_CONCEPT_DETAIL } from '@/data/dummy';
 import { CONCEPT_QUESTIONS } from '@/data/questions';
 import { splitStations } from '@/data/society';
@@ -137,7 +137,7 @@ function SharpenContent() {
   // ── Display fields: prefer the live DB concept, then local demo data ──────
   const conceptName  = apiConcept?.name ?? localConcept?.name ?? '';
   const subjectKey   = apiConcept?.subjectKey ?? localConcept?.subjectKey ?? 'science';
-  const subject      = SUBJECTS.find(s => s.key === subjectKey);
+  const subject      = subjectDisplay(subjectKey);
   const chapterName  = apiConcept?.chapterName
     ?? CHAPTER_DATA[localConcept?.subjectKey ?? '']?.find(ch => ch.id === localConcept?.chapterId)?.name
     ?? 'Chapter';
@@ -489,8 +489,8 @@ function SharpenContent() {
               ← Back to Brain Map
             </button>
 
-            <div className="text-[10px] font-bold tracking-widest mb-1" style={{ color: subject?.color ?? COLORS.science }}>
-              {subject?.label.toUpperCase() ?? 'SCIENCE'} · {chapterName}
+            <div className="text-[10px] font-bold tracking-widest mb-1" style={{ color: subject.color }}>
+              {subject.label.toUpperCase()} · {chapterName}
             </div>
             <h2 className="text-xl font-extrabold mb-2" style={{ color: '#1c1917' }}>{conceptName}</h2>
 
@@ -557,8 +557,8 @@ function SharpenContent() {
               question={question}
               conceptName={conceptName}
               chapterName={chapterName}
-              subjectName={subject?.label ?? 'Science'}
-              subjectColor={subject?.color ?? COLORS.science}
+              subjectName={subject.label}
+              subjectColor={subject.color}
               current={currentIdx}
               total={questions.length}
               onNext={handleNext}

@@ -59,6 +59,26 @@ export const SUBJECT_MAP = Object.fromEntries(
   SUBJECTS.map(s => [s.key, s])
 ) as Record<string, typeof SUBJECTS[number]>;
 
+// English sub-subjects (DB subject_key) → display label.
+const ENGLISH_SUB_LABEL: Record<string, string> = {
+  english_vocab:   'English · Vocabulary',
+  english_grammar: 'English · Grammar',
+  english_rc:      'English · Reading',
+  english_lit:     'English · Literature',
+  english_writing: 'English · Writing',
+};
+
+// Resolve a display label + color for ANY subject key, including the English
+// sub-subjects that aren't top-level SUBJECTS entries.
+export function subjectDisplay(key: string | null | undefined): { label: string; color: string } {
+  const s = SUBJECTS.find(sub => sub.key === key);
+  if (s) return { label: s.label, color: s.color };
+  if (key && key.startsWith('english')) {
+    return { label: ENGLISH_SUB_LABEL[key] ?? 'English', color: COLORS.english };
+  }
+  return { label: 'Science', color: COLORS.science };
+}
+
 // ─── Mastery state display ────────────────────────────────────────────────────
 
 export const MASTERY_MAP: Record<

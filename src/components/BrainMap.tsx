@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { SUBJECTS, COLORS, MASTERY_MAP, type MasteryState } from '@/lib/tokens';
+import { SUBJECTS, COLORS, MASTERY_MAP, subjectDisplay, type MasteryState } from '@/lib/tokens';
 import { GridBackground } from './GridBackground';
 import { RightPanel } from './RightPanel';
 import type { Concept } from '@/types';
@@ -24,25 +24,6 @@ function polarPos(cx: number, cy: number, r: number, i: number, total: number, o
 
 function masteryColor(state: MasteryState) {
   return MASTERY_MAP[state].color;
-}
-
-// Resolve display label + color for any subject key, including the English
-// sub-subjects (english_vocab, english_grammar, …) that aren't in SUBJECTS.
-const ENGLISH_SUB_LABEL: Record<string, string> = {
-  english_vocab:   'English · Vocabulary',
-  english_grammar: 'English · Grammar',
-  english_rc:      'English · Reading',
-  english_lit:     'English · Literature',
-  english_writing: 'English · Writing',
-};
-
-function subjectDisplay(key: string | null): { label: string; color: string } {
-  const s = SUBJECTS.find(sub => sub.key === key);
-  if (s) return { label: s.label, color: s.color };
-  if (key && key.startsWith('english')) {
-    return { label: ENGLISH_SUB_LABEL[key] ?? 'English', color: COLORS.english };
-  }
-  return { label: 'Science', color: COLORS.science };
 }
 
 // Build a panel-ready Concept from a single-concept API payload.
