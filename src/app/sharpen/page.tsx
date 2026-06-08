@@ -360,7 +360,7 @@ function SharpenContent() {
                   {passed ? 'Great work! 🎉' : 'Here\'s what to focus on'}
                 </h2>
                 <p className="text-xs mb-4" style={{ color: '#a8a29e' }}>
-                  {conceptName} · {apiResult ? (apiResult.aiGrading ? 'provisional score' : 'AI score') : 'MCQ score'}: {pct}%
+                  {conceptName} · {apiResult ? (apiResult.aiGrading ? 'provisional score' : 'overall score') : 'score'}: {pct}%
                 </p>
               </>
             )}

@@ -27,14 +27,17 @@ func GetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Count open answers that Gemini hasn't graded yet
+	// Count open answers that Gemini hasn't graded yet. This MUST match the
+	// grader's filter (grade.GradeOpenAnswers) — every non-MCQ answer with text
+	// — or polling stops early for the newer types (GENERATIVE_PRODUCTION, etc.)
+	// and the results screen freezes on the provisional MCQ-only score.
 	var ungradedCount int
 	db.Pool.QueryRow(r.Context(), `
 		SELECT COUNT(*) FROM session_answers
-		WHERE session_id        = $1
-		  AND question_type     IN ('DESCRIPTIVE','FEYNMAN','BLURT','ACTIVE_RECALL')
-		  AND student_text      IS NOT NULL
-		  AND ai_graded_at      IS NULL
+		WHERE session_id    = $1
+		  AND question_type <> 'MCQ'
+		  AND student_text  IS NOT NULL
+		  AND ai_graded_at  IS NULL
 	`, sessionID).Scan(&ungradedCount)
 
 	// Current mastery state (updated after AI grading completes)

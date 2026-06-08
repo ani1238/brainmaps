@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -98,6 +99,7 @@ func GradeOpenAnswers(sessionID string) {
 
 	results, err := callGeminiBatch(ctx, shared.ConceptName, shared.SubjectKey, shared.ChapterName, items)
 	if err != nil {
+		log.Printf("[grade] session %s: gemini batch failed: %v", sessionID, err)
 		// Hard failure: neutral 0.5 for every answer so the session still completes
 		results = make([]GradeResult, len(answers))
 		for i := range results {
