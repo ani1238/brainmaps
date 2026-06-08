@@ -131,8 +131,9 @@ type gradeItem struct {
 
 // Models used for grading.
 const (
-	geminiModel = "gemini-flash-lite-latest" // cheap Gemini tier (primary)
-	openAIModel = "gpt-5.4-mini"              // OpenAI Responses API (fallback)
+	groqModel   = "llama-3.3-70b-versatile"  // Groq (primary — fast + free tier)
+	geminiModel = "gemini-flash-lite-latest" // cheap Gemini tier (fallback)
+	openAIModel = "gpt-5.4-mini"             // OpenAI Responses API (fallback)
 )
 
 // gradeBatch grades every answer in a session with ONE model call.
@@ -178,21 +179,78 @@ func gradeBatch(ctx context.Context, conceptName, subjectKey, chapterName string
 	return results, nil
 }
 
-// callModel sends the grading prompt to Gemini (Flash-Lite) first, falling back
-// to OpenAI if Gemini is unavailable (missing key, quota, outage). Either path
-// returns the model's JSON text, which gradeBatch then parses.
+// callModel sends the grading prompt through the configured providers in order
+// (Groq → Gemini → OpenAI), returning the first success. A single provider's
+// quota/outage falls through to the next. Returns the model's JSON text, which
+// gradeBatch then parses.
 func callModel(ctx context.Context, prompt string) (string, error) {
+	if key := os.Getenv("GROQ_API_KEY"); key != "" {
+		text, err := callGroqRaw(ctx, key, prompt)
+		if err == nil {
+			return text, nil
+		}
+		log.Printf("[grade] groq failed, falling back: %v", err)
+	}
 	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
 		text, err := callGeminiRaw(ctx, key, prompt)
 		if err == nil {
 			return text, nil
 		}
-		log.Printf("[grade] gemini failed, falling back to openai: %v", err)
+		log.Printf("[grade] gemini failed, falling back: %v", err)
 	}
 	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
 		return callOpenAIRaw(ctx, key, prompt)
 	}
-	return "", fmt.Errorf("no AI provider configured (set GEMINI_API_KEY or OPENAI_API_KEY)")
+	return "", fmt.Errorf("no AI provider configured (set GROQ_API_KEY, GEMINI_API_KEY or OPENAI_API_KEY)")
+}
+
+// callGroqRaw POSTs the prompt to Groq's OpenAI-compatible chat completions API
+// and returns the model's text output (expected to be the grading JSON).
+func callGroqRaw(ctx context.Context, apiKey, prompt string) (string, error) {
+	payload := map[string]any{
+		"model":           groqModel,
+		"messages":        []map[string]any{{"role": "user", "content": prompt}},
+		"response_format": map[string]any{"type": "json_object"},
+		"temperature":     0.2,
+		// Grading output is small JSON (a few hundred tokens). Keep this modest:
+		// Groq counts max_tokens against the free-tier 12k tokens/min budget, so
+		// an oversized value rate-limits us after one request.
+		"max_tokens": 2048,
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("groq %d: %s", resp.StatusCode, raw)
+	}
+
+	var r struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return "", err
+	}
+	if len(r.Choices) == 0 || strings.TrimSpace(r.Choices[0].Message.Content) == "" {
+		return "", fmt.Errorf("groq: empty response: %s", raw)
+	}
+	return r.Choices[0].Message.Content, nil
 }
 
 // callOpenAIRaw POSTs the prompt to the OpenAI Responses API and returns the
