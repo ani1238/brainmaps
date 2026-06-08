@@ -7,7 +7,7 @@ import { GridBackground } from './GridBackground';
 import { RightPanel } from './RightPanel';
 import type { Concept } from '@/types';
 import { CONCEPT_DATA, CONCEPT_BY_ID, ENGLISH_TRACKS } from '@/data/dummy';
-import { fetchChapters, fetchConcepts, type ApiChapter } from '@/lib/api';
+import { fetchChapters, fetchConcept, fetchConcepts, type ApiChapter, type ApiConceptDetail } from '@/lib/api';
 
 type MapLevel = 'subject' | 'chapter' | 'concept' | 'english';
 
@@ -24,6 +24,23 @@ function polarPos(cx: number, cy: number, r: number, i: number, total: number, o
 
 function masteryColor(state: MasteryState) {
   return MASTERY_MAP[state].color;
+}
+
+// Build a panel-ready Concept from a single-concept API payload.
+function apiDetailToConcept(c: ApiConceptDetail): Concept {
+  return {
+    id: c.id,
+    name: c.name,
+    state: (c.progress?.state ?? 'NOT_STARTED') as Concept['state'],
+    score: c.progress?.emaScore,
+    attempts: c.progress?.totalAttempts,
+    l1State: c.progress?.l1State,
+    l2State: c.progress?.l2State,
+    l3State: c.progress?.l3State,
+    strengthenState: c.progress?.strengthenState,
+    reviseState: c.progress?.reviseState,
+    reviseUnlocked: c.progress?.reviseUnlocked,
+  };
 }
 
 // ── Main BrainMap component ───────────────────────────────────────────────
@@ -97,21 +114,39 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
   useEffect(() => {
     const conceptId = searchParams.get('conceptId');
     if (!conceptId) return;
+
+    function restore(subjectKey: string, chapterId: string, chapterLabel: string, concept: Concept) {
+      const subjectMeta = SUBJECTS.find(s => s.key === subjectKey);
+      setSelectedSubject(subjectKey);
+      setSelectedChapter(chapterId);
+      setLevel('concept');
+      setBreadcrumb([
+        { level: 'subject', label: subjectMeta?.label ?? subjectKey, key: subjectKey },
+        { level: 'chapter', label: chapterLabel, key: chapterId },
+      ]);
+      setSelectedConcept(concept);
+      setShowPanel(true);
+      setAnimKey(k => k + 1);
+    }
+
+    // 1. Dummy demo concept — restore directly from local data
     const loc = CONCEPT_BY_ID[conceptId];
-    if (!loc) return;
+    if (loc) {
+      restore(loc.subjectKey, loc.chapterId, loc.chapterId, loc);
+      return;
+    }
 
-    const subjectMeta = SUBJECTS.find(s => s.key === loc.subjectKey);
-
-    setSelectedSubject(loc.subjectKey);
-    setSelectedChapter(loc.chapterId);
-    setLevel('concept');
-    setBreadcrumb([
-      { level: 'subject', label: subjectMeta?.label ?? loc.subjectKey, key: loc.subjectKey },
-      { level: 'chapter', label: loc.chapterId, key: loc.chapterId },
-    ]);
-    setSelectedConcept(loc);
-    setShowPanel(true);
-    setAnimKey(k => k + 1);
+    // 2. Real DB concept — fetch its details so we land on the right chapter
+    let cancelled = false;
+    fetchConcept(conceptId)
+      .then(c => {
+        if (cancelled) return;
+        // Load the chapter's siblings so the orbit renders, then open the panel
+        fetchChapters(c.subjectKey).then(chs => { if (!cancelled) setChapters(chs); }).catch(() => {});
+        restore(c.subjectKey, c.chapterId, c.chapterName, apiDetailToConcept(c));
+      })
+      .catch(() => {}); // unknown concept — stay on the subject view
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

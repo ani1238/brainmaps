@@ -7,7 +7,7 @@ import { LeftRail } from '@/components/LeftRail';
 import { QuestionScreen } from '@/components/QuestionScreen';
 import type { AnswerPayload } from '@/components/QuestionScreen';
 import { COLORS, SUBJECTS, MASTERY_MAP } from '@/lib/tokens';
-import { SESSION_QUESTIONS, CHAPTER_DATA, CONCEPT_BY_ID, CONCEPT_DETAILS, DEFAULT_CONCEPT_DETAIL } from '@/data/dummy';
+import { CHAPTER_DATA, CONCEPT_BY_ID, CONCEPT_DETAILS, DEFAULT_CONCEPT_DETAIL } from '@/data/dummy';
 import { CONCEPT_QUESTIONS } from '@/data/questions';
 import { splitStations } from '@/data/society';
 import { STATION_LABELS } from '@/lib/tokens';
@@ -119,19 +119,18 @@ const NEXT_LEVEL: Partial<Record<QuestionLevel, QuestionLevel>> = {
 function SharpenContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const conceptIdParam = searchParams.get('conceptId');
-  const conceptId = conceptIdParam ?? 'c104';
+  const conceptId = searchParams.get('conceptId'); // null when none supplied
   const level = (searchParams.get('level') as QuestionLevel | null) ?? null;
 
   // Local dummy concept — only the old demo concepts (c1xx, s2xx) live here.
-  const localConcept = CONCEPT_BY_ID[conceptId];
-  const localDetail = CONCEPT_DETAILS[conceptId] ?? DEFAULT_CONCEPT_DETAIL;
+  const localConcept = conceptId ? CONCEPT_BY_ID[conceptId] : undefined;
+  const localDetail = (conceptId && CONCEPT_DETAILS[conceptId]) || DEFAULT_CONCEPT_DETAIL;
 
   // Real concept details fetched from the DB (name, subject, chapter, recap).
   const [apiConcept, setApiConcept] = useState<ApiConceptDetail | null>(null);
 
   // ── Display fields: prefer the live DB concept, then local demo data ──────
-  const conceptName  = apiConcept?.name ?? localConcept?.name ?? 'Concept';
+  const conceptName  = apiConcept?.name ?? localConcept?.name ?? '';
   const subjectKey   = apiConcept?.subjectKey ?? localConcept?.subjectKey ?? 'science';
   const subject      = SUBJECTS.find(s => s.key === subjectKey);
   const chapterName  = apiConcept?.chapterName
@@ -141,17 +140,15 @@ function SharpenContent() {
   const masteryState = (apiConcept?.progress?.state ?? localConcept?.state ?? 'WEAK') as keyof typeof MASTERY_MAP;
 
   const stationLabel = level ? LEVEL_TO_STATION_LABEL[level] : null;
-  const backToMapHref = `/brain-map?conceptId=${conceptId}`;
+  const backToMapHref = conceptId ? `/brain-map?conceptId=${conceptId}` : '/brain-map';
 
-  // Local fallback questions. NEVER leak the demo photosynthesis set into a
-  // real DB concept — only use it when no explicit conceptId was supplied
-  // (the "Fix 5 tricky bits" demo button on the brain map).
+  // Local fallback questions. ONLY the old demo concepts have local questions;
+  // real DB concepts always load from the API. The photosynthesis demo set is
+  // never used as a fallback, so it can no longer leak into a real concept.
   function localFallbackQuestions(): Question[] {
+    if (!conceptId) return [];
     const local = CONCEPT_QUESTIONS[conceptId];
     if (local) return level ? (splitStations(local)[level] ?? []) : local;
-    if (!conceptIdParam) {
-      return level ? (splitStations(SESSION_QUESTIONS)[level] ?? []) : SESSION_QUESTIONS;
-    }
     return [];
   }
 
@@ -174,6 +171,7 @@ function SharpenContent() {
 
   // Fetch the real concept's details (name, subject, chapter, recap) from the DB.
   useEffect(() => {
+    if (!conceptId) return;
     let cancelled = false;
     fetchConcept(conceptId)
       .then(c => { if (!cancelled) setApiConcept(c); })
@@ -198,7 +196,7 @@ function SharpenContent() {
     setQuestions(localFallbackQuestions());
     setQuestionsFromApi(false);
 
-    if (!level) return;
+    if (!level || !conceptId) return;
 
     // 3. Always try the DB first. If it has questions, use them and start a
     //    graded session. Otherwise keep whatever local fallback we have.
@@ -279,7 +277,7 @@ function SharpenContent() {
     setApiResult(null);
     if (pollRef.current) clearInterval(pollRef.current);
     // Start a fresh session (only if questions are backed by the DB)
-    if (questionsFromApi && level) {
+    if (questionsFromApi && level && conceptId) {
       startSession(conceptId, level)
         .then(id => { sessionIdRef.current = id; })
         .catch(() => {});
@@ -439,9 +437,11 @@ function SharpenContent() {
               </>
             ) : (
               <>
-                <div className="text-4xl mb-3">📭</div>
+                <div className="text-4xl mb-3">{conceptId ? '📭' : '🧠'}</div>
                 <p className="text-sm font-semibold mb-4" style={{ color: '#78716c' }}>
-                  No questions yet for {stationLabel ? `${stationLabel} of ` : ''}{conceptName}.
+                  {conceptId
+                    ? `No questions yet for ${stationLabel ? `${stationLabel} of ` : ''}${conceptName}.`
+                    : 'Pick a concept from your Brain Map to start practising.'}
                 </p>
                 <button
                   onClick={() => router.push(backToMapHref)}
