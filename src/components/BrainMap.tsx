@@ -6,8 +6,8 @@ import { SUBJECTS, COLORS, MASTERY_MAP, type MasteryState } from '@/lib/tokens';
 import { GridBackground } from './GridBackground';
 import { RightPanel } from './RightPanel';
 import type { Concept } from '@/types';
-import { CHAPTER_DATA, CONCEPT_DATA, CONCEPT_BY_ID, ENGLISH_TRACKS } from '@/data/dummy';
-import { fetchConcepts } from '@/lib/api';
+import { CONCEPT_DATA, CONCEPT_BY_ID, ENGLISH_TRACKS } from '@/data/dummy';
+import { fetchChapters, fetchConcepts, type ApiChapter } from '@/lib/api';
 
 type MapLevel = 'subject' | 'chapter' | 'concept' | 'english';
 
@@ -37,6 +37,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
   const [selectedConcept, setSelectedConcept] = useState<Concept | null>(null);
   const [animKey, setAnimKey] = useState(0);
   const [showPanel, setShowPanel] = useState(false);
+  const [chapters, setChapters] = useState<ApiChapter[]>([]);
 
   // "center" of the orbit area (exclude left rail 240px)
   const cx = width / 2;
@@ -46,16 +47,21 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
   const orbitCx = (width - panelW) / 2;
 
   function zoomToSubject(subjectKey: string, subjectLabel: string) {
-    if (subjectKey === 'eng') {
+    if (subjectKey === 'english') {
       setLevel('english');
-      setSelectedSubject('eng');
-      setBreadcrumb([{ level: 'subject', label: 'English', key: 'eng' }]);
+      setSelectedSubject('english');
+      setBreadcrumb([{ level: 'subject', label: 'English', key: 'english' }]);
+      setAnimKey(k => k + 1);
     } else {
+      setChapters([]); // clear while loading
       setLevel('chapter');
       setSelectedSubject(subjectKey);
       setBreadcrumb([{ level: 'subject', label: subjectLabel, key: subjectKey }]);
+      setAnimKey(k => k + 1);
+      fetchChapters(subjectKey)
+        .then(data => setChapters(data))
+        .catch(() => setChapters([]));
     }
-    setAnimKey(k => k + 1);
   }
 
   function zoomToChapter(chapterId: string, chapterName: string) {
@@ -95,14 +101,13 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
     if (!loc) return;
 
     const subjectMeta = SUBJECTS.find(s => s.key === loc.subjectKey);
-    const chapterMeta = CHAPTER_DATA[loc.subjectKey]?.find(ch => ch.id === loc.chapterId);
 
     setSelectedSubject(loc.subjectKey);
     setSelectedChapter(loc.chapterId);
     setLevel('concept');
     setBreadcrumb([
       { level: 'subject', label: subjectMeta?.label ?? loc.subjectKey, key: loc.subjectKey },
-      { level: 'chapter', label: chapterMeta?.name ?? loc.chapterId, key: loc.chapterId },
+      { level: 'chapter', label: loc.chapterId, key: loc.chapterId },
     ]);
     setSelectedConcept(loc);
     setShowPanel(true);
@@ -179,9 +184,8 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
         {level === 'chapter' && selectedSubject && (
           <>
             <circle cx={orbitCx} cy={cy} r={260} fill="none" stroke="rgba(168,162,158,0.3)" strokeWidth={1} strokeDasharray="4 6" />
-            {(CHAPTER_DATA[selectedSubject] ?? []).map((ch, i) => {
-              const total = CHAPTER_DATA[selectedSubject].length;
-              const pos = polarPos(orbitCx, cy, 260, i, total);
+            {chapters.map((ch, i) => {
+              const pos = polarPos(orbitCx, cy, 260, i, chapters.length);
               return (
                 <line key={ch.id}
                   x1={orbitCx} y1={cy} x2={pos.x} y2={pos.y}
@@ -248,7 +252,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
         <ChapterNodes
           key={`chap-${animKey}`}
           cx={orbitCx} cy={cy} r={260}
-          subjectKey={selectedSubject}
+          chapters={chapters}
           subjectColor={SUBJECTS.find(s => s.key === selectedSubject)?.color ?? '#4F46E5'}
           onSelect={zoomToChapter}
         />
@@ -295,9 +299,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
       {/* Right Panel */}
       {showPanel && selectedConcept && (() => {
-        const chapterName = selectedSubject && selectedChapter
-          ? CHAPTER_DATA[selectedSubject]?.find(ch => ch.id === selectedChapter)?.name ?? 'Chapter'
-          : 'Chapter';
+        const chapterName = breadcrumb.find(b => b.level === 'chapter')?.label ?? 'Chapter';
         return (
           <RightPanel
             concept={selectedConcept}
@@ -387,15 +389,8 @@ function SubjectNodes({ cx, cy, r, onSelect }: {
     <>
       {SUBJECTS.map((s, i) => {
         const { x, y } = polarPos(cx, cy, r, i, SUBJECTS.length);
-        const hasDue = s.key === 'sci';
-        const chapList = CHAPTER_DATA[s.key] ?? [];
-        const weakCount = chapList.flatMap(ch => CONCEPT_DATA[ch.id] ?? [])
-          .filter(c => c.state === 'VERY_WEAK' || c.state === 'WEAK').length;
-        const subtitle = s.key === 'eng'
-          ? '5 tracks'
-          : weakCount > 0
-            ? `${chapList.length} chap · ${weakCount} weak`
-            : `${chapList.length} chap`;
+        const hasDue = false;
+        const subtitle = s.key === 'english' ? '5 tracks' : 'tap to explore';
         return (
           <div
             key={s.key}
@@ -446,23 +441,26 @@ function SubjectNodes({ cx, cy, r, onSelect }: {
   );
 }
 
-function ChapterNodes({ cx, cy, r, subjectKey, subjectColor, onSelect }: {
+function ChapterNodes({ cx, cy, r, chapters, subjectColor, onSelect }: {
   cx: number; cy: number; r: number;
-  subjectKey: string; subjectColor: string;
+  chapters: ApiChapter[]; subjectColor: string;
   onSelect: (id: string, name: string) => void;
 }) {
-  const chapters = CHAPTER_DATA[subjectKey] ?? [];
+  if (chapters.length === 0) {
+    return (
+      <div
+        className="absolute text-sm font-semibold animate-pulse"
+        style={{ left: cx - 60, top: cy + 80, color: '#78716c' }}
+      >
+        Loading chapters…
+      </div>
+    );
+  }
 
   return (
     <>
       {chapters.map((ch, i) => {
         const { x, y } = polarPos(cx, cy, r, i, chapters.length);
-        const arcDeg = ch.strongPct * 3.6;
-        const rad = 28;
-        const arcX = rad * Math.cos((arcDeg * Math.PI / 180) - Math.PI / 2) + rad;
-        const arcY = rad * Math.sin((arcDeg * Math.PI / 180) - Math.PI / 2) + rad;
-        const large = arcDeg > 180 ? 1 : 0;
-
         return (
           <div
             key={ch.id}
@@ -475,17 +473,9 @@ function ChapterNodes({ cx, cy, r, subjectKey, subjectColor, onSelect }: {
             onClick={() => onSelect(ch.id, ch.name)}
           >
             <div className="relative w-20 h-20">
-              {/* mastery arc ring */}
+              {/* orbit ring (empty — no mastery data yet) */}
               <svg className="absolute inset-0 -rotate-90" width="80" height="80" viewBox="0 0 80 80">
                 <circle cx="40" cy="40" r="36" fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="4" />
-                <circle
-                  cx="40" cy="40" r="36"
-                  fill="none"
-                  stroke={subjectColor}
-                  strokeWidth="4"
-                  strokeLinecap="round"
-                  strokeDasharray={`${(ch.strongPct / 100) * 2 * Math.PI * 36} ${2 * Math.PI * 36}`}
-                />
               </svg>
               {/* chapter disc */}
               <div className="absolute inset-2 rounded-full flex flex-col items-center justify-center transition-all group-hover:scale-105"
@@ -499,7 +489,7 @@ function ChapterNodes({ cx, cy, r, subjectKey, subjectColor, onSelect }: {
             </div>
             <div className="mt-2 text-center" style={{ maxWidth: 120 }}>
               <div className="text-xs font-semibold leading-snug" style={{ color: '#1c1917' }}>{ch.name}</div>
-              <div className="text-xs mt-0.5" style={{ color: '#78716c' }}>{ch.strongPct}% got it!</div>
+              <div className="text-[10px] font-mono mt-0.5" style={{ color: '#a8a29e' }}>Ch {ch.number}</div>
             </div>
           </div>
         );

@@ -22,11 +22,13 @@ export const COLORS = {
   ghost: '#a8a29e',
 
   // Subject
-  science: '#0d9488',
+  science:       '#0d9488',
+  socialScience: '#7c3aed',
+  english:       '#e11d48',
+  // Legacy (kept for dummy data / dashboard)
   history: '#d97706',
   geo: '#059669',
   civics: '#4f46e5',
-  english: '#e11d48',
   society: '#9333ea',
 
   // Mastery states
@@ -40,24 +42,22 @@ export const COLORS = {
 
 // ─── Subjects ─────────────────────────────────────────────────────────────────
 
+// Live subjects — keys match the DB subject_key column
 export const SUBJECTS: {
-  key: SubjectKey;
+  key: string;
   label: string;
   letter: string;
   color: string;
   icon: string;
 }[] = [
-  { key: 'sci',  label: 'Science',   letter: 'S', color: COLORS.science,  icon: '🔬' },
-  { key: 'hist', label: 'History',   letter: 'H', color: COLORS.history,  icon: '📜' },
-  { key: 'geo',  label: 'Geography', letter: 'G', color: COLORS.geo,      icon: '🌍' },
-  { key: 'civ',  label: 'Civics',    letter: 'C', color: COLORS.civics,   icon: '⚖️' },
-  { key: 'soc',  label: 'Society',   letter: 'O', color: COLORS.society,  icon: '🪷' },
-  { key: 'eng',  label: 'English',   letter: 'E', color: COLORS.english,  icon: '📖' },
+  { key: 'science',        label: 'Science',        letter: 'S',  color: COLORS.science,       icon: '🔬' },
+  { key: 'social_science', label: 'Social Science',  letter: 'SS', color: COLORS.socialScience, icon: '🌍' },
+  { key: 'english',        label: 'English',         letter: 'E',  color: COLORS.english,       icon: '📖' },
 ];
 
 export const SUBJECT_MAP = Object.fromEntries(
   SUBJECTS.map(s => [s.key, s])
-) as Record<SubjectKey, typeof SUBJECTS[number]>;
+) as Record<string, typeof SUBJECTS[number]>;
 
 // ─── Mastery state display ────────────────────────────────────────────────────
 

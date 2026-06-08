@@ -23,6 +23,7 @@ func NewRouter() http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Curriculum + progress
+		r.Get("/chapters", handlers.GetChapters)
 		r.Get("/concepts", handlers.GetConcepts)
 		r.Get("/concepts/{id}/questions", handlers.GetConceptQuestions)
 

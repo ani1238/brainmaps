@@ -25,6 +25,15 @@ export function isLiveConcept(conceptId: string): boolean {
 
 // ─── Backend response shapes ──────────────────────────────────────────────────
 
+export interface ApiChapter {
+  id: string;
+  subjectKey: string;
+  name: string;
+  number: number;
+  orderIdx: number;
+  conceptCount: number;
+}
+
 interface ApiProgress {
   emaScore: number;
   state: string;
@@ -108,6 +117,12 @@ function mapQuestion(q: ApiQuestion): Question {
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
+
+export async function fetchChapters(subjectKey: string): Promise<ApiChapter[]> {
+  const res = await fetch(`${API_BASE}/chapters?subject=${subjectKey}`);
+  if (!res.ok) throw new Error(`fetchChapters ${res.status}: ${await res.text()}`);
+  return res.json();
+}
 
 export async function fetchConcepts(chapterId: string): Promise<Concept[]> {
   const res = await fetch(
