@@ -97,9 +97,9 @@ func GradeOpenAnswers(sessionID string) {
 		}
 	}
 
-	results, err := callGeminiBatch(ctx, shared.ConceptName, shared.SubjectKey, shared.ChapterName, items)
+	results, err := gradeBatch(ctx, shared.ConceptName, shared.SubjectKey, shared.ChapterName, items)
 	if err != nil {
-		log.Printf("[grade] session %s: gemini batch failed: %v", sessionID, err)
+		log.Printf("[grade] session %s: AI grading failed: %v", sessionID, err)
 		// Hard failure: neutral 0.5 for every answer so the session still completes
 		results = make([]GradeResult, len(answers))
 		for i := range results {
@@ -129,17 +129,18 @@ type gradeItem struct {
 	RubricHint  *string
 }
 
-// callGeminiBatch grades every answer in a session with ONE Gemini call.
+// Models used for grading.
+const (
+	geminiModel = "gemini-flash-lite-latest" // cheap Gemini tier (primary)
+	openAIModel = "gpt-5.4-mini"              // OpenAI Responses API (fallback)
+)
+
+// gradeBatch grades every answer in a session with ONE model call.
 // It always returns a slice aligned to `items` (gaps filled with a neutral
 // score) on success, or a non-nil error on a hard failure.
-func callGeminiBatch(ctx context.Context, conceptName, subjectKey, chapterName string, items []gradeItem) ([]GradeResult, error) {
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("GEMINI_API_KEY not set")
-	}
-
+func gradeBatch(ctx context.Context, conceptName, subjectKey, chapterName string, items []gradeItem) ([]GradeResult, error) {
 	prompt := buildBatchPrompt(conceptName, subjectKey, chapterName, items)
-	text, err := callGeminiRaw(ctx, apiKey, prompt)
+	text, err := callModel(ctx, prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +178,85 @@ func callGeminiBatch(ctx context.Context, conceptName, subjectKey, chapterName s
 	return results, nil
 }
 
+// callModel sends the grading prompt to Gemini (Flash-Lite) first, falling back
+// to OpenAI if Gemini is unavailable (missing key, quota, outage). Either path
+// returns the model's JSON text, which gradeBatch then parses.
+func callModel(ctx context.Context, prompt string) (string, error) {
+	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
+		text, err := callGeminiRaw(ctx, key, prompt)
+		if err == nil {
+			return text, nil
+		}
+		log.Printf("[grade] gemini failed, falling back to openai: %v", err)
+	}
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		return callOpenAIRaw(ctx, key, prompt)
+	}
+	return "", fmt.Errorf("no AI provider configured (set GEMINI_API_KEY or OPENAI_API_KEY)")
+}
+
+// callOpenAIRaw POSTs the prompt to the OpenAI Responses API and returns the
+// model's text output (expected to be the grading JSON).
+func callOpenAIRaw(ctx context.Context, apiKey, prompt string) (string, error) {
+	payload := map[string]any{
+		"model": openAIModel,
+		"input": prompt,
+		"text": map[string]any{
+			"format": map[string]any{"type": "json_object"},
+		},
+		"max_output_tokens": 8192,
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/responses", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("openai %d: %s", resp.StatusCode, raw)
+	}
+
+	// Responses API envelope: prefer the convenience output_text, otherwise
+	// find the message item's output_text content (skip any reasoning items).
+	var r struct {
+		OutputText string `json:"output_text"`
+		Output     []struct {
+			Type    string `json:"type"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(r.OutputText) != "" {
+		return r.OutputText, nil
+	}
+	for _, o := range r.Output {
+		if o.Type != "message" {
+			continue
+		}
+		for _, c := range o.Content {
+			if c.Type == "output_text" && strings.TrimSpace(c.Text) != "" {
+				return c.Text, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("openai: empty response: %s", raw)
+}
+
 // callGeminiRaw POSTs a prompt to Gemini Flash and returns the JSON text body.
 func callGeminiRaw(ctx context.Context, apiKey, prompt string) (string, error) {
 	payload := map[string]any{
@@ -191,7 +271,7 @@ func callGeminiRaw(ctx context.Context, apiKey, prompt string) (string, error) {
 	}
 
 	body, _ := json.Marshal(payload)
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
+	url := "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
