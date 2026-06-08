@@ -9,6 +9,14 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// derefStr dereferences a nullable string pointer, returning fallback if nil.
+func derefStr(s *string, fallback string) string {
+	if s == nil {
+		return fallback
+	}
+	return *s
+}
+
 // GET /concepts?chapter=soc_chB&student=<uuid>
 // Returns all concepts in a chapter with the student's progress overlay.
 func GetConcepts(w http.ResponseWriter, r *http.Request) {
@@ -21,8 +29,10 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.Pool.Query(r.Context(), `
 		SELECT c.id, c.subject_key, c.chapter_id, c.name, c.order_idx,
-		       cp.ema_score, cp.state, cp.l1_done, cp.l2_done, cp.l3_done,
-		       cp.strengthen_done, cp.total_attempts, cp.last_session_at,
+		       cp.ema_score, cp.state,
+		       cp.l1_state, cp.l2_state, cp.l3_state,
+		       cp.strengthen_state, cp.revise_state, cp.revise_unlocked,
+		       cp.total_attempts, cp.last_session_at,
 		       rs.interval_days, rs.next_due_at
 		FROM concepts c
 		LEFT JOIN concept_progress cp
@@ -42,17 +52,20 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var cwp models.ConceptWithProgress
 		var (
-			emaScore       *float64
-			state          *models.MasteryState
-			l1, l2, l3, s *bool
-			attempts       *int
-			lastAt         interface{}
-			intervalDays   *int
-			nextDue        interface{}
+			emaScore                              *float64
+			state                                 *models.MasteryState
+			l1s, l2s, l3s, strS, revS            *string
+			revUnlocked                           *bool
+			attempts                              *int
+			lastAt                                interface{}
+			intervalDays                          *int
+			nextDue                               interface{}
 		)
 		if err := rows.Scan(
 			&cwp.ID, &cwp.SubjectKey, &cwp.ChapterID, &cwp.Name, &cwp.OrderIdx,
-			&emaScore, &state, &l1, &l2, &l3, &s, &attempts, &lastAt,
+			&emaScore, &state,
+			&l1s, &l2s, &l3s, &strS, &revS, &revUnlocked,
+			&attempts, &lastAt,
 			&intervalDays, &nextDue,
 		); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -60,16 +73,22 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if emaScore != nil {
+			ru := false
+			if revUnlocked != nil {
+				ru = *revUnlocked
+			}
 			cwp.Progress = &models.ConceptProgress{
-				StudentID:      studentID,
-				ConceptID:      cwp.ID,
-				EMAScore:       *emaScore,
-				State:          *state,
-				L1Done:         *l1,
-				L2Done:         *l2,
-				L3Done:         *l3,
-				StrengthenDone: *s,
-				TotalAttempts:  *attempts,
+				StudentID:       studentID,
+				ConceptID:       cwp.ID,
+				EMAScore:        *emaScore,
+				State:           *state,
+				L1State:         models.StationState(derefStr(l1s, "current")),
+				L2State:         models.StationState(derefStr(l2s, "locked")),
+				L3State:         models.StationState(derefStr(l3s, "locked")),
+				StrengthenState: models.StationState(derefStr(strS, "locked")),
+				ReviseState:     models.StationState(derefStr(revS, "locked")),
+				ReviseUnlocked:  ru,
+				TotalAttempts:   *attempts,
 			}
 		}
 

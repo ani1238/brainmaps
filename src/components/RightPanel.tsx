@@ -30,43 +30,52 @@ interface RightPanelProps {
 
 // ─── Derive the 5 station states ─────────────────────────────────────────────
 //
-// For API concepts (soc_chB), we use the exact l1Done/l2Done/l3Done flags from
-// the backend so unlock state is always accurate.
-// For dummy-data concepts, we fall back to inferring from mastery state.
+// For API concepts (soc_chB), the backend returns per-station state strings
+// ('locked'|'current'|'done'|'needs_fixing') — map them directly.
+// For dummy-data concepts, fall back to inferring from mastery state.
+
+function apiStateToStatus(s: string | undefined): StationStatus {
+  switch (s) {
+    case 'done':          return 'done';
+    case 'current':       return 'current';
+    case 'needs_fixing':  return 'needsFixing';
+    default:              return 'locked';
+  }
+}
 
 function deriveStations(concept: Concept): Record<StationKey, StationStatus> {
-  const isStrong = concept.state === 'STRONG' || concept.state === 'RECALL_DUE';
   const recall: StationStatus = concept.dueForRecall ? 'current' : 'done';
 
-  // ── API path: use exact server flags ────────────────────────────────────────
-  if (concept.l1Done !== undefined) {
-    const { l1Done, l2Done, l3Done, strengthenDone } = concept;
-
-    const learn: StationStatus    = l1Done       ? 'done'    : concept.state === 'VERY_WEAK' ? 'needsFixing' : 'current';
-    const getIt: StationStatus    = !l1Done       ? 'locked'  : l2Done  ? 'done' : concept.state === 'VERY_WEAK' ? 'needsFixing' : 'current';
-    const masterIt: StationStatus = !l2Done       ? 'locked'  : l3Done  ? 'done' : 'current';
-    const strengthen: StationStatus = !l3Done     ? 'locked'  : strengthenDone ? 'done' : 'current';
-    const revise: StationStatus   = (!strengthenDone || !isStrong) ? 'locked' : recall;
-
-    return { learn_it: learn, get_it: getIt, master_it: masterIt, strengthen, keep_it_fresh: revise };
+  // ── API path: station states come directly from the server ───────────────
+  if (concept.l1State !== undefined) {
+    return {
+      learn_it:      apiStateToStatus(concept.l1State),
+      get_it:        apiStateToStatus(concept.l2State),
+      master_it:     apiStateToStatus(concept.l3State),
+      strengthen:    apiStateToStatus(concept.strengthenState),
+      keep_it_fresh: concept.reviseState === 'locked'
+                       ? 'locked'
+                       : concept.dueForRecall ? 'current' : apiStateToStatus(concept.reviseState),
+    };
   }
 
   // ── Fallback: infer from mastery state (dummy data) ──────────────────────
   const score = concept.score ?? 0;
+  const isStrong = concept.state === 'STRONG' || concept.state === 'RECALL_DUE';
   switch (concept.state) {
     case 'NOT_STARTED':
-      return { learn_it: 'current',    get_it: 'locked',  master_it: 'locked', strengthen: 'locked', keep_it_fresh: 'locked' };
+      return { learn_it: 'current',     get_it: 'locked',     master_it: 'locked', strengthen: 'locked', keep_it_fresh: 'locked' };
     case 'VERY_WEAK':
-      return { learn_it: 'needsFixing',get_it: 'locked',  master_it: 'locked', strengthen: 'locked', keep_it_fresh: 'locked' };
+      return { learn_it: 'needsFixing', get_it: 'locked',     master_it: 'locked', strengthen: 'locked', keep_it_fresh: 'locked' };
     case 'WEAK':
-      return { learn_it: 'done',       get_it: 'needsFixing', master_it: 'locked', strengthen: 'locked', keep_it_fresh: 'locked' };
+      return { learn_it: 'done',        get_it: 'needsFixing',master_it: 'locked', strengthen: 'locked', keep_it_fresh: 'locked' };
     case 'DEVELOPING':
-      return { learn_it: 'done',       get_it: 'done',    master_it: 'current', strengthen: 'locked', keep_it_fresh: 'locked' };
+      return { learn_it: 'done',        get_it: 'done',       master_it: 'current',strengthen: 'locked', keep_it_fresh: 'locked' };
     case 'STRONG':
     case 'RECALL_DUE':
       return { learn_it: 'done', get_it: 'done', master_it: 'done', strengthen: 'current', keep_it_fresh: score >= 0.8 ? recall : 'locked' };
     default:
-      return { learn_it: 'current',    get_it: 'locked',  master_it: 'locked', strengthen: 'locked', keep_it_fresh: 'locked' };
+      return { learn_it: 'current',     get_it: 'locked',     master_it: 'locked', strengthen: 'locked', keep_it_fresh: 'locked' };
   }
 }
 

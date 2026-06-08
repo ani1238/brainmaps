@@ -70,6 +70,17 @@ const (
 	Weak        MasteryState = "WEAK"
 	Developing  MasteryState = "DEVELOPING"
 	Strong      MasteryState = "STRONG"
+	RecallDue   MasteryState = "RECALL_DUE"
+)
+
+// StationState is the per-station progress value stored in concept_progress.
+type StationState string
+
+const (
+	StationLocked      StationState = "locked"
+	StationCurrent     StationState = "current"
+	StationDone        StationState = "done"
+	StationNeedsFixing StationState = "needs_fixing"
 )
 
 type ConceptProgress struct {
@@ -77,10 +88,12 @@ type ConceptProgress struct {
 	ConceptID       string       `json:"conceptId"`
 	EMAScore        float64      `json:"emaScore"`
 	State           MasteryState `json:"state"`
-	L1Done          bool         `json:"l1Done"`
-	L2Done          bool         `json:"l2Done"`
-	L3Done          bool         `json:"l3Done"`
-	StrengthenDone  bool         `json:"strengthenDone"`
+	L1State         StationState `json:"l1State"`
+	L2State         StationState `json:"l2State"`
+	L3State         StationState `json:"l3State"`
+	StrengthenState StationState `json:"strengthenState"`
+	ReviseState     StationState `json:"reviseState"`
+	ReviseUnlocked  bool         `json:"reviseUnlocked"`
 	TotalAttempts   int          `json:"totalAttempts"`
 	LastSessionAt   *time.Time   `json:"lastSessionAt,omitempty"`
 }

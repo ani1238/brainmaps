@@ -17,15 +17,22 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fix queue: VERY_WEAK or WEAK concepts, no session in the last 24h
+	// Fix queue: concepts with a needs_fixing station, no session in the last 23 hours
 	fixRows, err := db.Pool.Query(r.Context(), `
 		SELECT c.id, c.subject_key, c.chapter_id, c.name, c.order_idx,
-		       cp.ema_score, cp.state, cp.l1_done, cp.l2_done, cp.l3_done,
-		       cp.strengthen_done, cp.total_attempts, cp.last_session_at
+		       cp.ema_score, cp.state,
+		       cp.l1_state, cp.l2_state, cp.l3_state,
+		       cp.strengthen_state, cp.revise_state, cp.revise_unlocked,
+		       cp.total_attempts, cp.last_session_at
 		FROM concept_progress cp
 		JOIN concepts c ON c.id = cp.concept_id
 		WHERE cp.student_id = $1
-		  AND cp.state IN ('VERY_WEAK', 'WEAK')
+		  AND (
+		        cp.l1_state = 'needs_fixing'
+		     OR cp.l2_state = 'needs_fixing'
+		     OR cp.l3_state = 'needs_fixing'
+		     OR cp.strengthen_state = 'needs_fixing'
+		  )
 		  AND (cp.last_session_at IS NULL OR cp.last_session_at < now() - INTERVAL '23 hours')
 		ORDER BY cp.ema_score ASC
 		LIMIT 8
@@ -36,13 +43,15 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 	}
 	defer fixRows.Close()
 
-	fixQueue := scanConceptProgress(fixRows, studentID)
+	fixQueue := scanProgressRows(fixRows, studentID, false)
 
 	// Revise queue: concepts due for spaced repetition today
 	revRows, err := db.Pool.Query(r.Context(), `
 		SELECT c.id, c.subject_key, c.chapter_id, c.name, c.order_idx,
-		       cp.ema_score, cp.state, cp.l1_done, cp.l2_done, cp.l3_done,
-		       cp.strengthen_done, cp.total_attempts, cp.last_session_at,
+		       cp.ema_score, cp.state,
+		       cp.l1_state, cp.l2_state, cp.l3_state,
+		       cp.strengthen_state, cp.revise_state, cp.revise_unlocked,
+		       cp.total_attempts, cp.last_session_at,
 		       rs.interval_days, rs.next_due_at
 		FROM revise_schedule rs
 		JOIN concepts c ON c.id = rs.concept_id
@@ -58,7 +67,7 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 	}
 	defer revRows.Close()
 
-	reviseQueue := scanConceptProgress(revRows, studentID)
+	reviseQueue := scanProgressRows(revRows, studentID, true)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(models.TodayResp{
@@ -67,48 +76,59 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func scanConceptProgress(rows interface {
+// scanProgressRows scans concept+progress rows.
+// withRevise=true expects two extra columns: interval_days, next_due_at.
+func scanProgressRows(rows interface {
 	Next() bool
 	Scan(...any) error
-}, studentID string) []models.ConceptWithProgress {
+}, studentID string, withRevise bool) []models.ConceptWithProgress {
 	var result []models.ConceptWithProgress
 	for rows.Next() {
 		var cwp models.ConceptWithProgress
 		var (
-			ema      float64
-			state    models.MasteryState
-			l1, l2, l3, s bool
-			attempts int
-			lastAt   *interface{}
-			// optional revise columns (may not be present in all queries)
-			intervalDays *int
-			nextDue      *interface{}
+			ema                        float64
+			state                      models.MasteryState
+			l1s, l2s, l3s, strS, revS string
+			revUnlocked                bool
+			attempts                   int
+			lastAt                     interface{}
 		)
 
-		// Try scanning with revise columns first, fall back if not present
-		err := rows.Scan(
-			&cwp.ID, &cwp.SubjectKey, &cwp.ChapterID, &cwp.Name, &cwp.OrderIdx,
-			&ema, &state, &l1, &l2, &l3, &s, &attempts, &lastAt,
-			&intervalDays, &nextDue,
-		)
-		if err != nil {
-			// Try without revise columns
-			rows.Scan(
+		var err error
+		if withRevise {
+			var intervalDays *int
+			var nextDue interface{}
+			err = rows.Scan(
 				&cwp.ID, &cwp.SubjectKey, &cwp.ChapterID, &cwp.Name, &cwp.OrderIdx,
-				&ema, &state, &l1, &l2, &l3, &s, &attempts, &lastAt,
+				&ema, &state,
+				&l1s, &l2s, &l3s, &strS, &revS, &revUnlocked,
+				&attempts, &lastAt,
+				&intervalDays, &nextDue,
 			)
+		} else {
+			err = rows.Scan(
+				&cwp.ID, &cwp.SubjectKey, &cwp.ChapterID, &cwp.Name, &cwp.OrderIdx,
+				&ema, &state,
+				&l1s, &l2s, &l3s, &strS, &revS, &revUnlocked,
+				&attempts, &lastAt,
+			)
+		}
+		if err != nil {
+			continue
 		}
 
 		cwp.Progress = &models.ConceptProgress{
-			StudentID:      studentID,
-			ConceptID:      cwp.ID,
-			EMAScore:       ema,
-			State:          state,
-			L1Done:         l1,
-			L2Done:         l2,
-			L3Done:         l3,
-			StrengthenDone: s,
-			TotalAttempts:  attempts,
+			StudentID:       studentID,
+			ConceptID:       cwp.ID,
+			EMAScore:        ema,
+			State:           state,
+			L1State:         models.StationState(l1s),
+			L2State:         models.StationState(l2s),
+			L3State:         models.StationState(l3s),
+			StrengthenState: models.StationState(strS),
+			ReviseState:     models.StationState(revS),
+			ReviseUnlocked:  revUnlocked,
+			TotalAttempts:   attempts,
 		}
 		result = append(result, cwp)
 	}

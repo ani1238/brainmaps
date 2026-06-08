@@ -309,28 +309,65 @@ func recomputeSession(ctx context.Context, sessionID string) {
 		      updated_at      = now()
 	`, studentID, conceptID, ema, state)
 
-	// Unlock next station if score >= 0.60 (forgiving threshold)
+	// Update per-station state based on outcome
 	const unlockThreshold = 0.60
-	if sessionScore >= unlockThreshold {
-		col := stationUnlockCol(models.StationKey(station))
-		if col != "" {
+	curCol := stationStateCol(models.StationKey(station))
+	if curCol != "" {
+		if sessionScore >= unlockThreshold {
+			// Passed: mark current station done and unlock the next one
+			nextSt := nextStationKey(models.StationKey(station))
+			nextCol := stationStateCol(nextSt)
+			if nextCol != "" {
+				db.Pool.Exec(ctx, fmt.Sprintf(
+					`UPDATE concept_progress SET %s = 'done', %s = 'current'
+					 WHERE student_id = $1 AND concept_id = $2`, curCol, nextCol,
+				), studentID, conceptID)
+			} else {
+				// Last station (revise) — just mark done
+				db.Pool.Exec(ctx, fmt.Sprintf(
+					`UPDATE concept_progress SET %s = 'done'
+					 WHERE student_id = $1 AND concept_id = $2`, curCol,
+				), studentID, conceptID)
+			}
+		} else {
+			// Failed: mark needs_fixing so Today's Fix can surface it
 			db.Pool.Exec(ctx, fmt.Sprintf(
-				`UPDATE concept_progress SET %s = true WHERE student_id = $1 AND concept_id = $2`, col,
+				`UPDATE concept_progress SET %s = 'needs_fixing'
+				 WHERE student_id = $1 AND concept_id = $2`, curCol,
 			), studentID, conceptID)
 		}
 	}
 }
 
-func stationUnlockCol(station models.StationKey) string {
+// stationStateCol returns the concept_progress column name for a given station.
+func stationStateCol(station models.StationKey) string {
 	switch station {
 	case models.StationLevel1:
-		return "l1_done"
+		return "l1_state"
 	case models.StationLevel2:
-		return "l2_done"
+		return "l2_state"
 	case models.StationLevel3:
-		return "l3_done"
+		return "l3_state"
 	case models.StationStrengthen:
-		return "strengthen_done"
+		return "strengthen_state"
+	case models.StationRevise:
+		return "revise_state"
+	default:
+		return ""
+	}
+}
+
+// nextStationKey returns the station that follows the given one.
+func nextStationKey(station models.StationKey) models.StationKey {
+	switch station {
+	case models.StationLevel1:
+		return models.StationLevel2
+	case models.StationLevel2:
+		return models.StationLevel3
+	case models.StationLevel3:
+		return models.StationStrengthen
+	case models.StationStrengthen:
+		return models.StationRevise
 	default:
 		return ""
 	}

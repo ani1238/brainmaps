@@ -33,11 +33,13 @@ export interface Concept {
   dueForRecall?: boolean;
   score?: number;
   attempts?: number;
-  // Populated when concept data comes from the live API (soc_chB)
-  l1Done?: boolean;
-  l2Done?: boolean;
-  l3Done?: boolean;
-  strengthenDone?: boolean;
+  // Per-station states from the live API ('locked'|'current'|'done'|'needs_fixing')
+  l1State?: string;
+  l2State?: string;
+  l3State?: string;
+  strengthenState?: string;
+  reviseState?: string;
+  reviseUnlocked?: boolean;
 }
 
 // ─── Primitives ───────────────────────────────────────────────────────────────

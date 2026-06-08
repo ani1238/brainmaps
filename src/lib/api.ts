@@ -28,10 +28,12 @@ export function isLiveConcept(conceptId: string): boolean {
 interface ApiProgress {
   emaScore: number;
   state: string;
-  l1Done: boolean;
-  l2Done: boolean;
-  l3Done: boolean;
-  strengthenDone: boolean;
+  l1State: string;
+  l2State: string;
+  l3State: string;
+  strengthenState: string;
+  reviseState: string;
+  reviseUnlocked: boolean;
   totalAttempts: number;
 }
 
@@ -78,11 +80,13 @@ function mapConcept(c: ApiConcept): Concept {
     score: c.progress?.emaScore,
     attempts: c.progress?.totalAttempts,
     dueForRecall,
-    // Station-level completion flags (only present for API concepts)
-    l1Done: c.progress?.l1Done,
-    l2Done: c.progress?.l2Done,
-    l3Done: c.progress?.l3Done,
-    strengthenDone: c.progress?.strengthenDone,
+    // Per-station states from the API ('locked'|'current'|'done'|'needs_fixing')
+    l1State: c.progress?.l1State,
+    l2State: c.progress?.l2State,
+    l3State: c.progress?.l3State,
+    strengthenState: c.progress?.strengthenState,
+    reviseState: c.progress?.reviseState,
+    reviseUnlocked: c.progress?.reviseUnlocked,
   };
 }
 
