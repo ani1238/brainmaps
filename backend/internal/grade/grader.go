@@ -76,41 +76,114 @@ func GradeOpenAnswers(sessionID string) {
 	}
 	rows.Close()
 
-	// 2. Grade each answer
-	for _, a := range answers {
-		result, err := callGemini(ctx, a.QType, a.ConceptName, a.SubjectKey, a.ChapterName, a.QText, a.StudentText, a.KeyConcepts, a.RubricHint)
-		if err != nil {
-			// On failure: assign a neutral 0.5 so the session can still complete
-			result = &GradeResult{Score: 0.5, Feedback: "We had trouble grading this one — keep practising!"}
-		}
+	if len(answers) == 0 {
+		recomputeSession(ctx, sessionID)
+		return
+	}
 
+	// 2. Grade EVERY answer in a SINGLE Gemini call. A session is always one
+	//    concept + one station, so all answers share the same curriculum
+	//    context — we send them together instead of one call per answer.
+	shared := answers[0]
+	items := make([]gradeItem, len(answers))
+	for i, a := range answers {
+		items[i] = gradeItem{
+			QType:       a.QType,
+			QText:       a.QText,
+			StudentText: a.StudentText,
+			KeyConcepts: a.KeyConcepts,
+			RubricHint:  a.RubricHint,
+		}
+	}
+
+	results, err := callGeminiBatch(ctx, shared.ConceptName, shared.SubjectKey, shared.ChapterName, items)
+	if err != nil {
+		// Hard failure: neutral 0.5 for every answer so the session still completes
+		results = make([]GradeResult, len(answers))
+		for i := range results {
+			results[i] = GradeResult{Score: 0.5, Feedback: "We had trouble grading this one — keep practising!"}
+		}
+	}
+
+	// 3. Persist each grade
+	for i, a := range answers {
 		db.Pool.Exec(ctx, `
 			UPDATE session_answers
 			SET ai_score = $1, ai_feedback = $2, ai_graded_at = now()
 			WHERE id = $3
-		`, result.Score, result.Feedback, a.AnswerID)
+		`, results[i].Score, results[i].Feedback, a.AnswerID)
 	}
 
-	// 3. Recompute session score including AI grades and update concept_progress
+	// 4. Recompute session score including AI grades and update concept_progress
 	recomputeSession(ctx, sessionID)
 }
 
-// callGemini sends one answer to Gemini Flash and returns a score + feedback.
-func callGemini(ctx context.Context, qType, conceptName, subjectKey, chapterName, question, answer string, keyConcepts []string, rubricHint *string) (*GradeResult, error) {
+// gradeItem is one answer to grade inside a batch call.
+type gradeItem struct {
+	QType       string
+	QText       string
+	StudentText string
+	KeyConcepts []string
+	RubricHint  *string
+}
+
+// callGeminiBatch grades every answer in a session with ONE Gemini call.
+// It always returns a slice aligned to `items` (gaps filled with a neutral
+// score) on success, or a non-nil error on a hard failure.
+func callGeminiBatch(ctx context.Context, conceptName, subjectKey, chapterName string, items []gradeItem) ([]GradeResult, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY not set")
 	}
 
-	prompt := buildPrompt(qType, conceptName, subjectKey, chapterName, question, answer, keyConcepts, rubricHint)
+	prompt := buildBatchPrompt(conceptName, subjectKey, chapterName, items)
+	text, err := callGeminiRaw(ctx, apiKey, prompt)
+	if err != nil {
+		return nil, err
+	}
 
+	var parsed struct {
+		Grades []struct {
+			Index    int     `json:"index"`
+			Score    float64 `json:"score"`
+			Feedback string  `json:"feedback"`
+		} `json:"grades"`
+	}
+	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
+		return nil, fmt.Errorf("parse batch json: %w", err)
+	}
+
+	// Align results to input order (1-based index); fill any gaps with neutral 0.5.
+	results := make([]GradeResult, len(items))
+	for i := range results {
+		results[i] = GradeResult{Score: 0.5, Feedback: "We had trouble grading this one — keep practising!"}
+	}
+	for _, g := range parsed.Grades {
+		idx := g.Index - 1
+		if idx < 0 || idx >= len(results) {
+			continue
+		}
+		score := g.Score
+		if score < 0 {
+			score = 0
+		}
+		if score > 1 {
+			score = 1
+		}
+		results[idx] = GradeResult{Score: score, Feedback: g.Feedback}
+	}
+	return results, nil
+}
+
+// callGeminiRaw POSTs a prompt to Gemini Flash and returns the JSON text body.
+func callGeminiRaw(ctx context.Context, apiKey, prompt string) (string, error) {
 	payload := map[string]any{
 		"contents": []map[string]any{
 			{"parts": []map[string]any{{"text": prompt}}},
 		},
 		"generationConfig": map[string]any{
 			"responseMimeType": "application/json",
-			"maxOutputTokens":  2048, // gemini-3.5-flash is a thinking model; needs headroom beyond its reasoning tokens
+			"maxOutputTokens":  8192, // batch of grades + thinking-model reasoning headroom
 			"temperature":      0.2,
 		},
 	}
@@ -120,23 +193,22 @@ func callGemini(ctx context.Context, qType, conceptName, subjectKey, chapterName
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-goog-api-key", apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("gemini %d: %s", resp.StatusCode, raw)
+		return "", fmt.Errorf("gemini %d: %s", resp.StatusCode, raw)
 	}
 
-	// Extract text from Gemini response envelope
 	var geminiResp struct {
 		Candidates []struct {
 			Content struct {
@@ -147,70 +219,58 @@ func callGemini(ctx context.Context, qType, conceptName, subjectKey, chapterName
 		} `json:"candidates"`
 	}
 	if err := json.Unmarshal(raw, &geminiResp); err != nil {
-		return nil, err
+		return "", err
 	}
 	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
-		return nil, fmt.Errorf("empty gemini response")
+		return "", fmt.Errorf("empty gemini response")
 	}
-
-	text := geminiResp.Candidates[0].Content.Parts[0].Text
-	var result GradeResult
-	if err := json.Unmarshal([]byte(text), &result); err != nil {
-		return nil, fmt.Errorf("parse grade json: %w", err)
-	}
-
-	// Clamp score to [0, 1]
-	if result.Score < 0 {
-		result.Score = 0
-	}
-	if result.Score > 1 {
-		result.Score = 1
-	}
-
-	return &result, nil
+	return geminiResp.Candidates[0].Content.Parts[0].Text, nil
 }
 
-func buildPrompt(qType, conceptName, subjectKey, chapterName, question, answer string, keyConcepts []string, rubricHint *string) string {
+// buildBatchPrompt builds one prompt that grades all answers in a session.
+func buildBatchPrompt(conceptName, subjectKey, chapterName string, items []gradeItem) string {
 	var sb strings.Builder
 
-	// ── Grader identity + curriculum context ─────────────────────────────────
+	// ── Grader identity + shared curriculum context ──────────────────────────
 	sb.WriteString("You are an expert grader for BrainMaps, an AI-powered learning app for Indian school students.\n\n")
-	sb.WriteString("CURRICULUM CONTEXT:\n")
+	sb.WriteString("CURRICULUM CONTEXT (applies to every answer below):\n")
 	sb.WriteString("- Board: CBSE (Central Board of Secondary Education), India\n")
 	sb.WriteString("- Class: 6 (approx. age 11–12)\n")
 	sb.WriteString("- Subject: " + subjectLabel(subjectKey) + "\n")
 	sb.WriteString("- Chapter: " + chapterName + "\n")
+	sb.WriteString("- Concept being tested: " + conceptName + "\n")
 	sb.WriteString("- Reference: NCERT Class 6 textbooks for this subject\n")
-	sb.WriteString("- Expected language level: simple English sentences; basic vocabulary; no jargon required\n")
-	sb.WriteString("- Expected knowledge depth: Class 6 NCERT level — broad conceptual understanding, not specialist detail\n\n")
+	sb.WriteString("- Expected language level: simple English; basic vocabulary; no jargon required\n")
+	sb.WriteString("- Expected knowledge depth: Class 6 NCERT level — broad understanding, not specialist detail\n\n")
 
-	// ── Question context ──────────────────────────────────────────────────────
-	sb.WriteString("QUESTION CONTEXT:\n")
-	sb.WriteString("Concept being tested: " + conceptName + "\n")
-	sb.WriteString("Question type: " + qType + "\n")
-	sb.WriteString("Question: " + question + "\n")
+	sb.WriteString(fmt.Sprintf("Grade the following %d student answers. Grade each one INDEPENDENTLY on its own merits.\n\n", len(items)))
 
-	if len(keyConcepts) > 0 {
-		sb.WriteString("Key ideas the answer should cover: " + strings.Join(keyConcepts, "; ") + "\n")
+	// ── Each answer with its own question context + scoring bands ─────────────
+	for i, it := range items {
+		sb.WriteString(fmt.Sprintf("════════ ANSWER %d ════════\n", i+1))
+		sb.WriteString("Question type: " + it.QType + "\n")
+		sb.WriteString("Question: " + it.QText + "\n")
+		if len(it.KeyConcepts) > 0 {
+			sb.WriteString("Key ideas the answer should cover: " + strings.Join(it.KeyConcepts, "; ") + "\n")
+		}
+		if it.RubricHint != nil && *it.RubricHint != "" {
+			sb.WriteString("Marking guide (NCERT-aligned): " + *it.RubricHint + "\n")
+		}
+		sb.WriteString("Scoring bands (0.0–1.0):\n" + scoringRubric(it.QType))
+		sb.WriteString("STUDENT'S ANSWER: " + it.StudentText + "\n\n")
 	}
-	if rubricHint != nil && *rubricHint != "" {
-		sb.WriteString("Marking guide (NCERT-aligned): " + *rubricHint + "\n")
-	}
 
-	sb.WriteString("\nSTUDENT'S ANSWER:\n" + answer + "\n\n")
-
-	// ── Scoring rubric per question type ──────────────────────────────────────
-	sb.WriteString("SCORING RUBRIC (0.0–1.0) for a Class 6 CBSE student:\n")
-	sb.WriteString(scoringRubric(qType))
-
-	// ── Feedback instructions ─────────────────────────────────────────────────
-	sb.WriteString("\nFEEDBACK INSTRUCTIONS:\n")
+	// ── Feedback instructions + output schema ────────────────────────────────
+	sb.WriteString("FEEDBACK INSTRUCTIONS (for every answer):\n")
 	sb.WriteString("Write exactly 3 short sentences addressed directly to the student:\n")
 	sb.WriteString("1. Acknowledge something they got right (be specific, name the idea — even if small).\n")
 	sb.WriteString("2. Point out exactly what NCERT concept or fact was missing or wrong — name it explicitly.\n")
 	sb.WriteString("3. Give one clear, actionable tip for next time (what to remember or how to improve).\n")
-	sb.WriteString("Rules: each sentence ≤ 20 words; tone is warm and encouraging; use simple Class 6 language; no bullet points in feedback.\n\n")
-	sb.WriteString(`Return ONLY valid JSON (no markdown, no extra text): {"score": 0.XX, "feedback": "sentence1 sentence2 sentence3"}`)
+	sb.WriteString("Rules: each sentence ≤ 20 words; tone is warm and encouraging; use simple Class 6 language; no bullet points.\n\n")
+
+	sb.WriteString("Return ONLY valid JSON (no markdown, no extra text). Include one entry per answer, in order, ")
+	sb.WriteString("using the ANSWER number as \"index\":\n")
+	sb.WriteString(`{"grades":[{"index":1,"score":0.XX,"feedback":"sentence1 sentence2 sentence3"}]}`)
 
 	return sb.String()
 }
