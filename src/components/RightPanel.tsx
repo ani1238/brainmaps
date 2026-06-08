@@ -369,4 +369,9 @@ const TYPE_LABELS: Record<string, string> = {
   FEYNMAN: 'teach-a-friend',
   BLURT: 'brain-dump',
   ACTIVE_RECALL: 'real-world',
+  SPOT_IT: 'spot-it',
+  FIX_IT: 'fix-it',
+  PRODUCE_IT: 'produce-it',
+  GENERATIVE_PRODUCTION: 'produce-it',
+  CONTEXT_CLUE: 'context-clue',
 };

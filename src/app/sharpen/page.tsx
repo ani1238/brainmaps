@@ -21,11 +21,16 @@ import type { Question } from '@/types';
 // ── Feedback panel ────────────────────────────────────────────────────────────
 
 const Q_TYPE_LABEL: Record<string, string> = {
-  MCQ:          'Multiple choice',
-  FEYNMAN:      'Explain it simply',
-  BLURT:        'Brain dump',
-  ACTIVE_RECALL:'Apply it',
-  DESCRIPTIVE:  'Short answer',
+  MCQ:                   'Multiple choice',
+  FEYNMAN:               'Explain it simply',
+  BLURT:                 'Brain dump',
+  ACTIVE_RECALL:         'Apply it',
+  DESCRIPTIVE:           'Short answer',
+  SPOT_IT:               'Spot it',
+  FIX_IT:                'Fix it',
+  PRODUCE_IT:            'Produce it',
+  GENERATIVE_PRODUCTION: 'Produce it',
+  CONTEXT_CLUE:          'Use the clues',
 };
 
 function FeedbackCard({ item }: { item: AnswerFeedback }) {

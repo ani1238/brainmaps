@@ -22,23 +22,25 @@ type GradeResult struct {
 }
 
 // GradeOpenAnswers runs async after a session completes.
-// It grades DESCRIPTIVE, FEYNMAN, BLURT, and ACTIVE_RECALL answers via Gemini Flash,
-// then recomputes the session score and updates concept_progress.
+// It grades EVERY non-MCQ answer (DESCRIPTIVE, FEYNMAN, BLURT, ACTIVE_RECALL,
+// SPOT_IT, FIX_IT, PRODUCE_IT, CONTEXT_CLUE, GENERATIVE_PRODUCTION, …) via
+// Gemini Flash, then recomputes the session score and updates concept_progress.
 func GradeOpenAnswers(sessionID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	// 1. Load all open-ended answers for this session
+	// 1. Load all open-ended answers for this session (anything that isn't MCQ)
 	rows, err := db.Pool.Query(ctx, `
 		SELECT sa.id, sa.question_id, sa.question_type, sa.student_text,
 		       q.text, q.key_concepts, q.rubric_hint,
-		       c.name AS concept_name
+		       c.name AS concept_name, c.subject_key, ch.name AS chapter_name
 		FROM session_answers sa
 		JOIN questions q ON q.id = sa.question_id
 		JOIN sessions  s ON s.id = sa.session_id
 		JOIN concepts  c ON c.id = s.concept_id
+		JOIN chapters  ch ON ch.id = c.chapter_id
 		WHERE sa.session_id = $1
-		  AND sa.question_type IN ('DESCRIPTIVE','FEYNMAN','BLURT','ACTIVE_RECALL')
+		  AND sa.question_type <> 'MCQ'
 		  AND sa.student_text IS NOT NULL
 		  AND sa.ai_graded_at IS NULL
 	`, sessionID)
@@ -56,6 +58,8 @@ func GradeOpenAnswers(sessionID string) {
 		KeyConcepts []string
 		RubricHint  *string
 		ConceptName string
+		SubjectKey  string
+		ChapterName string
 	}
 
 	var answers []answerRow
@@ -63,7 +67,8 @@ func GradeOpenAnswers(sessionID string) {
 		var a answerRow
 		if err := rows.Scan(
 			&a.AnswerID, &a.QuestionID, &a.QType, &a.StudentText,
-			&a.QText, &a.KeyConcepts, &a.RubricHint, &a.ConceptName,
+			&a.QText, &a.KeyConcepts, &a.RubricHint,
+			&a.ConceptName, &a.SubjectKey, &a.ChapterName,
 		); err != nil {
 			continue
 		}
@@ -73,7 +78,7 @@ func GradeOpenAnswers(sessionID string) {
 
 	// 2. Grade each answer
 	for _, a := range answers {
-		result, err := callGemini(ctx, a.QType, a.ConceptName, a.QText, a.StudentText, a.KeyConcepts, a.RubricHint)
+		result, err := callGemini(ctx, a.QType, a.ConceptName, a.SubjectKey, a.ChapterName, a.QText, a.StudentText, a.KeyConcepts, a.RubricHint)
 		if err != nil {
 			// On failure: assign a neutral 0.5 so the session can still complete
 			result = &GradeResult{Score: 0.5, Feedback: "We had trouble grading this one — keep practising!"}
@@ -91,13 +96,13 @@ func GradeOpenAnswers(sessionID string) {
 }
 
 // callGemini sends one answer to Gemini Flash and returns a score + feedback.
-func callGemini(ctx context.Context, qType, conceptName, question, answer string, keyConcepts []string, rubricHint *string) (*GradeResult, error) {
+func callGemini(ctx context.Context, qType, conceptName, subjectKey, chapterName, question, answer string, keyConcepts []string, rubricHint *string) (*GradeResult, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY not set")
 	}
 
-	prompt := buildPrompt(qType, conceptName, question, answer, keyConcepts, rubricHint)
+	prompt := buildPrompt(qType, conceptName, subjectKey, chapterName, question, answer, keyConcepts, rubricHint)
 
 	payload := map[string]any{
 		"contents": []map[string]any{
@@ -165,7 +170,7 @@ func callGemini(ctx context.Context, qType, conceptName, question, answer string
 	return &result, nil
 }
 
-func buildPrompt(qType, conceptName, question, answer string, keyConcepts []string, rubricHint *string) string {
+func buildPrompt(qType, conceptName, subjectKey, chapterName, question, answer string, keyConcepts []string, rubricHint *string) string {
 	var sb strings.Builder
 
 	// ── Grader identity + curriculum context ─────────────────────────────────
@@ -173,9 +178,9 @@ func buildPrompt(qType, conceptName, question, answer string, keyConcepts []stri
 	sb.WriteString("CURRICULUM CONTEXT:\n")
 	sb.WriteString("- Board: CBSE (Central Board of Secondary Education), India\n")
 	sb.WriteString("- Class: 6 (approx. age 11–12)\n")
-	sb.WriteString("- Subject: Social Science — History strand\n")
-	sb.WriteString("- Textbook: NCERT \"Our Pasts – Part I\" (Class VI History)\n")
-	sb.WriteString("- Chapter theme: Tapestry of the Past — ancient Indian history, sources, names, texts, science, trade, and kingdoms\n")
+	sb.WriteString("- Subject: " + subjectLabel(subjectKey) + "\n")
+	sb.WriteString("- Chapter: " + chapterName + "\n")
+	sb.WriteString("- Reference: NCERT Class 6 textbooks for this subject\n")
 	sb.WriteString("- Expected language level: simple English sentences; basic vocabulary; no jargon required\n")
 	sb.WriteString("- Expected knowledge depth: Class 6 NCERT level — broad conceptual understanding, not specialist detail\n\n")
 
@@ -196,28 +201,7 @@ func buildPrompt(qType, conceptName, question, answer string, keyConcepts []stri
 
 	// ── Scoring rubric per question type ──────────────────────────────────────
 	sb.WriteString("SCORING RUBRIC (0.0–1.0) for a Class 6 CBSE student:\n")
-	switch qType {
-	case "DESCRIPTIVE":
-		sb.WriteString("- 0.8–1.0: correctly answers all parts of the question at Class 6 NCERT level; uses appropriate terms\n")
-		sb.WriteString("- 0.5–0.8: mostly correct but missing one key NCERT fact or detail\n")
-		sb.WriteString("- 0.2–0.5: partially correct — gets the gist but has significant gaps or errors\n")
-		sb.WriteString("- 0.0–0.2: off-topic, fundamentally wrong, or just restates the question\n")
-	case "FEYNMAN":
-		sb.WriteString("- 0.8–1.0: explains the concept in simple, clear words; covers all key NCERT ideas as if teaching a younger child\n")
-		sb.WriteString("- 0.5–0.8: explains most key ideas but is unclear or incomplete in places\n")
-		sb.WriteString("- 0.2–0.5: touches on the concept but misses major ideas or is confusing\n")
-		sb.WriteString("- 0.0–0.2: explanation is wrong, off-topic, or just copies the question back\n")
-	case "BLURT":
-		sb.WriteString("- 0.8–1.0: recalls most key NCERT facts about the topic from memory; good coverage\n")
-		sb.WriteString("- 0.5–0.8: recalls several correct points but misses some important NCERT content\n")
-		sb.WriteString("- 0.2–0.5: only recalls a few scattered points; significant gaps\n")
-		sb.WriteString("- 0.0–0.2: recalls almost nothing relevant, or writes something unrelated\n")
-	case "ACTIVE_RECALL":
-		sb.WriteString("- 0.8–1.0: correctly applies the NCERT concept to the new scenario with clear reasoning\n")
-		sb.WriteString("- 0.5–0.8: applies the concept in the right direction but reasoning is incomplete\n")
-		sb.WriteString("- 0.2–0.5: shows partial understanding but mostly misapplies or confuses the concept\n")
-		sb.WriteString("- 0.0–0.2: does not apply the concept; answer is generic or irrelevant\n")
-	}
+	sb.WriteString(scoringRubric(qType))
 
 	// ── Feedback instructions ─────────────────────────────────────────────────
 	sb.WriteString("\nFEEDBACK INSTRUCTIONS:\n")
@@ -229,6 +213,81 @@ func buildPrompt(qType, conceptName, question, answer string, keyConcepts []stri
 	sb.WriteString(`Return ONLY valid JSON (no markdown, no extra text): {"score": 0.XX, "feedback": "sentence1 sentence2 sentence3"}`)
 
 	return sb.String()
+}
+
+// subjectLabel turns a DB subject_key into a human-readable subject name.
+func subjectLabel(subjectKey string) string {
+	switch subjectKey {
+	case "science":
+		return "Science"
+	case "social_science":
+		return "Social Science (History, Geography, Civics, Economics)"
+	case "english", "english_lit":
+		return "English — Literature"
+	case "english_grammar":
+		return "English — Grammar"
+	case "english_vocab":
+		return "English — Vocabulary"
+	case "english_writing":
+		return "English — Writing"
+	case "english_rc":
+		return "English — Reading Comprehension"
+	default:
+		return "Social Science"
+	}
+}
+
+// scoringRubric returns the 0.0–1.0 marking band text for a question type.
+// Every non-MCQ type is covered; unknown types fall back to a generic band.
+func scoringRubric(qType string) string {
+	switch qType {
+	case "DESCRIPTIVE":
+		return "- 0.8–1.0: correctly answers all parts of the question at Class 6 NCERT level; uses appropriate terms\n" +
+			"- 0.5–0.8: mostly correct but missing one key NCERT fact or detail\n" +
+			"- 0.2–0.5: partially correct — gets the gist but has significant gaps or errors\n" +
+			"- 0.0–0.2: off-topic, fundamentally wrong, or just restates the question\n"
+	case "FEYNMAN":
+		return "- 0.8–1.0: explains the concept in simple, clear words; covers all key NCERT ideas as if teaching a younger child\n" +
+			"- 0.5–0.8: explains most key ideas but is unclear or incomplete in places\n" +
+			"- 0.2–0.5: touches on the concept but misses major ideas or is confusing\n" +
+			"- 0.0–0.2: explanation is wrong, off-topic, or just copies the question back\n"
+	case "BLURT":
+		return "- 0.8–1.0: recalls most key NCERT facts about the topic from memory; good coverage\n" +
+			"- 0.5–0.8: recalls several correct points but misses some important NCERT content\n" +
+			"- 0.2–0.5: only recalls a few scattered points; significant gaps\n" +
+			"- 0.0–0.2: recalls almost nothing relevant, or writes something unrelated\n"
+	case "ACTIVE_RECALL":
+		return "- 0.8–1.0: correctly applies the NCERT concept to the new scenario with clear reasoning\n" +
+			"- 0.5–0.8: applies the concept in the right direction but reasoning is incomplete\n" +
+			"- 0.2–0.5: shows partial understanding but mostly misapplies or confuses the concept\n" +
+			"- 0.0–0.2: does not apply the concept; answer is generic or irrelevant\n"
+	case "SPOT_IT":
+		return "- 0.8–1.0: correctly identifies the target item/error/example and explains why it fits\n" +
+			"- 0.5–0.8: identifies the right thing but the reason is thin or partly wrong\n" +
+			"- 0.2–0.5: spots something related but misses the actual target\n" +
+			"- 0.0–0.2: identifies the wrong thing or gives no valid reasoning\n"
+	case "FIX_IT":
+		return "- 0.8–1.0: correctly finds the mistake AND fixes it with the right correction\n" +
+			"- 0.5–0.8: finds the mistake but the fix is incomplete or slightly off\n" +
+			"- 0.2–0.5: senses something is wrong but mislocates or mis-fixes it\n" +
+			"- 0.0–0.2: misses the error entirely or makes the answer worse\n"
+	case "PRODUCE_IT", "GENERATIVE_PRODUCTION":
+		return "- 0.8–1.0: produces a correct, original example/sentence/answer that fully meets the brief\n" +
+			"- 0.5–0.8: produces something on-topic and mostly correct but with a small flaw\n" +
+			"- 0.2–0.5: attempt is related but has clear errors or misses the brief\n" +
+			"- 0.0–0.2: off-topic, copied, or does not meet the task at all\n"
+	case "CONTEXT_CLUE":
+		return "- 0.8–1.0: correctly infers the meaning/answer using clues from the passage, with sound reasoning\n" +
+			"- 0.5–0.8: reasonable inference but reasoning is partly unsupported by the clues\n" +
+			"- 0.2–0.5: guesses in the right area but ignores or misreads the clues\n" +
+			"- 0.0–0.2: inference is unsupported, wrong, or unrelated to the passage\n"
+	default:
+		// Generic band for any other open-ended type
+		return "- 0.8–1.0: fully correct and complete at Class 6 NCERT level\n" +
+			"- 0.5–0.8: mostly correct but missing a key point or detail\n" +
+			"- 0.2–0.5: partially correct with significant gaps or errors\n" +
+			"- 0.0–0.2: off-topic, wrong, or just restates the question\n"
+	}
 }
 
 // RecomputeSession is exported so the sessions handler can call it for MCQ-only sessions.

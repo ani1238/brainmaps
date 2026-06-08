@@ -75,6 +75,12 @@ export function QuestionScreen({
           <ActiveRecallQuestion question={question} onNext={onNext}
             onSubmitAnswer={onSubmitAnswer} />
         )}
+        {/* New open-ended types (Spot it, Fix it, Produce it, Context clue, …):
+            free-text answers, all graded by Gemini like the others. */}
+        {!['MCQ', 'DESCRIPTIVE', 'FEYNMAN', 'BLURT', 'ACTIVE_RECALL'].includes(question.type) && (
+          <GenericTextQuestion question={question} onNext={onNext}
+            onSubmitAnswer={onSubmitAnswer} />
+        )}
       </div>
 
       {/* Footer */}
@@ -260,6 +266,91 @@ function DescriptiveQuestion({ question, onNext, onSubmitAnswer }: {
           value={text}
           onChange={e => setText(e.target.value)}
           placeholder="Write your answer…"
+          rows={8}
+          className="w-full rounded-xl p-4 text-sm resize-none outline-none transition-all"
+          style={{
+            background: '#fdfdfb',
+            border: '1.5px solid rgba(0,0,0,0.1)',
+            color: '#1c1917',
+            lineHeight: '1.75',
+            fontFamily: 'inherit',
+          }}
+        />
+        <div
+          className="absolute bottom-2 right-3 text-[10px] font-mono"
+          style={{ color: '#78716c' }}
+        >
+          {text.split(/\s+/).filter(Boolean).length} / 200 words
+        </div>
+      </div>
+
+      {question.rubricHint && (
+        <div
+          className="rounded-xl overflow-hidden"
+          style={{ border: '1px dashed rgba(79,70,229,0.4)' }}
+        >
+          <button
+            onClick={() => setHintOpen(h => !h)}
+            className="w-full flex justify-between items-center px-4 py-2.5 text-xs font-bold"
+            style={{ color: '#4F46E5' }}
+          >
+            <span>Need a hint? Tap to {hintOpen ? 'hide' : 'see'}</span>
+            <span>{hintOpen ? '▲' : '▼'}</span>
+          </button>
+          {hintOpen && (
+            <div className="px-4 pb-3 text-sm" style={{ color: '#78716c' }}>
+              {question.rubricHint}
+            </div>
+          )}
+        </div>
+      )}
+
+      <button
+        onClick={handleSubmit}
+        className="py-3 rounded-xl font-bold text-sm text-white transition-all hover:opacity-90 active:scale-[0.98]"
+        style={{ background: '#4F46E5' }}
+      >
+        Submit
+      </button>
+    </div>
+  );
+}
+
+// ── Generic open-ended (Spot it / Fix it / Produce it / Context clue / …) ──
+
+const OPEN_TYPE_COPY: Record<string, { label: string; placeholder: string }> = {
+  SPOT_IT:               { label: 'Spot it',       placeholder: 'Point out what you spotted and why…' },
+  FIX_IT:                { label: 'Fix it',        placeholder: 'Find the mistake and write the correction…' },
+  PRODUCE_IT:            { label: 'Produce it',    placeholder: 'Write your own example or answer…' },
+  GENERATIVE_PRODUCTION: { label: 'Produce it',    placeholder: 'Write your own example or answer…' },
+  CONTEXT_CLUE:          { label: 'Use the clues', placeholder: 'Use the clues to work out your answer…' },
+};
+
+function GenericTextQuestion({ question, onNext, onSubmitAnswer }: {
+  question: Question; onNext: () => void;
+  onSubmitAnswer?: (p: AnswerPayload) => void;
+}) {
+  const [text, setText] = useState('');
+  const [hintOpen, setHintOpen] = useState(false);
+  const copy = OPEN_TYPE_COPY[question.type] ?? { label: 'Your answer', placeholder: 'Write your answer…' };
+
+  function handleSubmit() {
+    onSubmitAnswer?.({ questionId: question.id, questionType: question.type, studentText: text });
+    onNext();
+  }
+
+  return (
+    <div className="p-5 flex flex-col gap-4">
+      <div>
+        <div className="text-xs font-bold mb-2" style={{ color: '#78716c' }}>{copy.label}</div>
+        <p className="font-bold text-lg leading-snug" style={{ color: '#1c1917' }}>{question.text}</p>
+      </div>
+
+      <div className="relative">
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          placeholder={copy.placeholder}
           rows={8}
           className="w-full rounded-xl p-4 text-sm resize-none outline-none transition-all"
           style={{

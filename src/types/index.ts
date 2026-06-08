@@ -1,6 +1,16 @@
 // ─── Legacy question type (matches questions.ts data format) ─────────────────
 
-export type QuestionType = 'MCQ' | 'DESCRIPTIVE' | 'FEYNMAN' | 'BLURT' | 'ACTIVE_RECALL';
+export type QuestionType =
+  | 'MCQ'
+  | 'DESCRIPTIVE'
+  | 'FEYNMAN'
+  | 'BLURT'
+  | 'ACTIVE_RECALL'
+  | 'SPOT_IT'
+  | 'FIX_IT'
+  | 'PRODUCE_IT'
+  | 'CONTEXT_CLUE'
+  | 'GENERATIVE_PRODUCTION';
 
 export interface MCQOption {
   id: string;
