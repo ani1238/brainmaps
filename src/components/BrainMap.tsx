@@ -26,6 +26,25 @@ function masteryColor(state: MasteryState) {
   return MASTERY_MAP[state].color;
 }
 
+// Resolve display label + color for any subject key, including the English
+// sub-subjects (english_vocab, english_grammar, …) that aren't in SUBJECTS.
+const ENGLISH_SUB_LABEL: Record<string, string> = {
+  english_vocab:   'English · Vocabulary',
+  english_grammar: 'English · Grammar',
+  english_rc:      'English · Reading',
+  english_lit:     'English · Literature',
+  english_writing: 'English · Writing',
+};
+
+function subjectDisplay(key: string | null): { label: string; color: string } {
+  const s = SUBJECTS.find(sub => sub.key === key);
+  if (s) return { label: s.label, color: s.color };
+  if (key && key.startsWith('english')) {
+    return { label: ENGLISH_SUB_LABEL[key] ?? 'English', color: COLORS.english };
+  }
+  return { label: 'Science', color: COLORS.science };
+}
+
 // Build a panel-ready Concept from a single-concept API payload.
 function apiDetailToConcept(c: ApiConceptDetail): Concept {
   return {
@@ -81,6 +100,22 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
     }
   }
 
+  // English track (Vocabulary, Grammar, …) → its chapters. Each track is its
+  // own DB subject_key (english_vocab, english_grammar, …).
+  function zoomToEnglishTrack(trackSubjectKey: string, trackLabel: string) {
+    setChapters([]); // clear while loading
+    setLevel('chapter');
+    setSelectedSubject(trackSubjectKey);
+    setBreadcrumb([
+      { level: 'subject', label: 'English', key: 'english' },
+      { level: 'chapter', label: trackLabel, key: trackSubjectKey },
+    ]);
+    setAnimKey(k => k + 1);
+    fetchChapters(trackSubjectKey)
+      .then(data => setChapters(data))
+      .catch(() => setChapters([]));
+  }
+
   function zoomToChapter(chapterId: string, chapterName: string) {
     setLevel('concept');
     setSelectedChapter(chapterId);
@@ -93,6 +128,11 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       setLevel('chapter');
       setSelectedChapter(null);
       setBreadcrumb(bc => bc.slice(0, -1));
+    } else if (level === 'chapter' && selectedSubject?.startsWith('english_')) {
+      // English track's chapter view → back to the English track list
+      setLevel('english');
+      setSelectedSubject('english');
+      setBreadcrumb([{ level: 'subject', label: 'English', key: 'english' }]);
     } else {
       setLevel('subject');
       setSelectedSubject(null);
@@ -288,7 +328,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
           key={`chap-${animKey}`}
           cx={orbitCx} cy={cy} r={260}
           chapters={chapters}
-          subjectColor={SUBJECTS.find(s => s.key === selectedSubject)?.color ?? '#4F46E5'}
+          subjectColor={subjectDisplay(selectedSubject).color}
           onSelect={zoomToChapter}
         />
       )}
@@ -306,6 +346,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
         <EnglishTracks
           key={`eng-${animKey}`}
           cx={orbitCx} cy={cy} r={220}
+          onSelect={zoomToEnglishTrack}
         />
       )}
 
@@ -334,13 +375,16 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
       {/* Right Panel */}
       {showPanel && selectedConcept && (() => {
-        const chapterName = breadcrumb.find(b => b.level === 'chapter')?.label ?? 'Chapter';
+        // Last chapter-level crumb is the real chapter (an English track also
+        // sits at chapter level, so take the last match, not the first).
+        const chapterName = [...breadcrumb].reverse().find(b => b.level === 'chapter')?.label ?? 'Chapter';
+        const sd = subjectDisplay(selectedSubject);
         return (
           <RightPanel
             concept={selectedConcept}
             chapterName={chapterName}
-            subjectName={SUBJECTS.find(s => s.key === selectedSubject)?.label ?? 'Science'}
-            subjectColor={SUBJECTS.find(s => s.key === selectedSubject)?.color ?? COLORS.science}
+            subjectName={sd.label}
+            subjectColor={sd.color}
             onClose={() => { setShowPanel(false); setSelectedConcept(null); }}
             onStartSharpen={() => router.push(`/sharpen?conceptId=${selectedConcept.id}`)}
             onStartRecall={() => router.push(`/recall?conceptId=${selectedConcept.id}`)}
@@ -388,6 +432,28 @@ function CenterNode({
           <div className="text-center">
             <div className="text-2xl font-extrabold" style={{ color: COLORS.english }}>English</div>
             <div className="text-xs font-mono mt-1" style={{ color: COLORS.english + 'aa' }}>5 TRACKS</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // English track chapter view — selectedSubject is an english_* sub-subject
+  if (selectedSubject && selectedSubject.startsWith('english')) {
+    const sd = subjectDisplay(selectedSubject);
+    const trackLabel = sd.label.replace('English · ', '');
+    return (
+      <div className="absolute flex flex-col items-center pointer-events-none"
+        style={{ left: cx - 64, top: cy - 64 }}>
+        <div className="w-32 h-32 rounded-full flex items-center justify-center"
+          style={{
+            background: `${COLORS.english}1a`,
+            border: `3px solid ${COLORS.english}`,
+            boxShadow: `0 0 30px ${COLORS.english}33`,
+          }}>
+          <div className="text-center px-2">
+            <div className="text-base font-extrabold" style={{ color: COLORS.english }}>English</div>
+            <div className="text-xs font-bold mt-0.5" style={{ color: COLORS.english }}>{trackLabel}</div>
           </div>
         </div>
       </div>
@@ -599,7 +665,19 @@ function ConceptNodes({ cx, cy, r, chapterId, onSelect }: {
   );
 }
 
-function EnglishTracks({ cx, cy, r }: { cx: number; cy: number; r: number }) {
+// Maps each dummy English track key to its real DB subject_key.
+const ENGLISH_TRACK_SUBJECT: Record<string, string> = {
+  voc: 'english_vocab',
+  grm: 'english_grammar',
+  rc:  'english_rc',
+  lit: 'english_lit',
+  wri: 'english_writing',
+};
+
+function EnglishTracks({ cx, cy, r, onSelect }: {
+  cx: number; cy: number; r: number;
+  onSelect: (subjectKey: string, label: string) => void;
+}) {
   return (
     <>
       {ENGLISH_TRACKS.map((t, i) => {
@@ -613,6 +691,7 @@ function EnglishTracks({ cx, cy, r }: { cx: number; cy: number; r: number }) {
               animationDelay: `${i * 60}ms`,
               animation: 'node-pop-direct 0.4s cubic-bezier(0.34,1.56,0.64,1) both',
             }}
+            onClick={() => onSelect(ENGLISH_TRACK_SUBJECT[t.key] ?? 'english', t.label)}
           >
             <div
               className="flex items-center gap-2 px-4 py-2 rounded-full transition-all group-hover:scale-105 group-hover:shadow-lg"
