@@ -55,32 +55,28 @@ export function QuestionScreen({
 
       {/* Question body */}
       <div className="flex-1 overflow-y-auto">
-        {question.type === 'MCQ' && (
-          <MCQQuestion question={question} onNext={onNext} onAnswer={onAnswer}
-            onSubmitAnswer={onSubmitAnswer} />
-        )}
-        {question.type === 'DESCRIPTIVE' && (
-          <DescriptiveQuestion question={question} onNext={onNext}
-            onSubmitAnswer={onSubmitAnswer} />
-        )}
-        {question.type === 'FEYNMAN' && (
-          <FeynmanQuestion question={question} onNext={onNext}
-            onSubmitAnswer={onSubmitAnswer} />
-        )}
-        {question.type === 'BLURT' && (
-          <BlurtQuestion question={question} onNext={onNext}
-            onSubmitAnswer={onSubmitAnswer} />
-        )}
-        {question.type === 'ACTIVE_RECALL' && (
-          <ActiveRecallQuestion question={question} onNext={onNext}
-            onSubmitAnswer={onSubmitAnswer} />
-        )}
-        {/* New open-ended types (Spot it, Fix it, Produce it, Context clue, …):
-            free-text answers, all graded by Gemini like the others. */}
-        {!['MCQ', 'DESCRIPTIVE', 'FEYNMAN', 'BLURT', 'ACTIVE_RECALL'].includes(question.type) && (
-          <GenericTextQuestion question={question} onNext={onNext}
-            onSubmitAnswer={onSubmitAnswer} />
-        )}
+        {(() => {
+          // Any question that carries answer options is a pick-one question —
+          // MCQ, but also Spot it / Context clue. Render + grade by option.
+          const hasOptions = (question.options?.length ?? 0) > 0;
+          if (hasOptions) {
+            return <MCQQuestion question={question} onNext={onNext} onAnswer={onAnswer}
+              onSubmitAnswer={onSubmitAnswer} />;
+          }
+          switch (question.type) {
+            case 'DESCRIPTIVE':
+              return <DescriptiveQuestion question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
+            case 'FEYNMAN':
+              return <FeynmanQuestion question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
+            case 'BLURT':
+              return <BlurtQuestion question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
+            case 'ACTIVE_RECALL':
+              return <ActiveRecallQuestion question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
+            default:
+              // Free-text open types (Fix it, Produce it, …) — graded by Gemini.
+              return <GenericTextQuestion question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
+          }
+        })()}
       </div>
 
       {/* Footer */}
