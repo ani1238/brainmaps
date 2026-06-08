@@ -52,14 +52,14 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var cwp models.ConceptWithProgress
 		var (
-			emaScore                              *float64
-			state                                 *models.MasteryState
-			l1s, l2s, l3s, strS, revS            *string
-			revUnlocked                           *bool
-			attempts                              *int
-			lastAt                                interface{}
-			intervalDays                          *int
-			nextDue                               interface{}
+			emaScore                  *float64
+			state                     *models.MasteryState
+			l1s, l2s, l3s, strS, revS *string
+			revUnlocked               *bool
+			attempts                  *int
+			lastAt                    interface{}
+			intervalDays              *int
+			nextDue                   interface{}
 		)
 		if err := rows.Scan(
 			&cwp.ID, &cwp.SubjectKey, &cwp.ChapterID, &cwp.Name, &cwp.OrderIdx,
@@ -97,6 +97,91 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// ConceptDetailResp is the single-concept payload used by the question screens.
+type ConceptDetailResp struct {
+	ID            string                  `json:"id"`
+	SubjectKey    string                  `json:"subjectKey"`
+	ChapterID     string                  `json:"chapterId"`
+	ChapterName   string                  `json:"chapterName"`
+	ChapterNumber int                     `json:"chapterNumber"`
+	Name          string                  `json:"name"`
+	Recap         string                  `json:"recap"`
+	Progress      *models.ConceptProgress `json:"progress,omitempty"`
+}
+
+// GET /concepts/{id}?student=<uuid>
+// Returns a single concept's display details (name, subject, chapter, recap)
+// plus the student's progress overlay when a student is supplied.
+func GetConcept(w http.ResponseWriter, r *http.Request) {
+	conceptID := chi.URLParam(r, "id")
+	studentID := r.URL.Query().Get("student")
+
+	var (
+		resp                      ConceptDetailResp
+		recap                     *string
+		emaScore                  *float64
+		state                     *models.MasteryState
+		l1s, l2s, l3s, strS, revS *string
+		revUnlocked               *bool
+		attempts                  *int
+	)
+
+	err := db.Pool.QueryRow(r.Context(), `
+		SELECT c.id, c.subject_key, c.chapter_id, c.name,
+		       ch.name, ch.number,
+		       c.metadata->>'recap_summary' AS recap,
+		       cp.ema_score, cp.state,
+		       cp.l1_state, cp.l2_state, cp.l3_state,
+		       cp.strengthen_state, cp.revise_state, cp.revise_unlocked,
+		       cp.total_attempts
+		FROM concepts c
+		JOIN chapters ch ON ch.id = c.chapter_id
+		LEFT JOIN concept_progress cp
+		       ON cp.concept_id = c.id AND cp.student_id = $2
+		WHERE c.id = $1
+	`, conceptID, studentID).Scan(
+		&resp.ID, &resp.SubjectKey, &resp.ChapterID, &resp.Name,
+		&resp.ChapterName, &resp.ChapterNumber,
+		&recap,
+		&emaScore, &state,
+		&l1s, &l2s, &l3s, &strS, &revS, &revUnlocked,
+		&attempts,
+	)
+	if err != nil {
+		http.Error(w, "concept not found", http.StatusNotFound)
+		return
+	}
+
+	resp.Recap = derefStr(recap, "")
+
+	if emaScore != nil {
+		ru := false
+		if revUnlocked != nil {
+			ru = *revUnlocked
+		}
+		at := 0
+		if attempts != nil {
+			at = *attempts
+		}
+		resp.Progress = &models.ConceptProgress{
+			StudentID:       studentID,
+			ConceptID:       resp.ID,
+			EMAScore:        *emaScore,
+			State:           *state,
+			L1State:         models.StationState(derefStr(l1s, "current")),
+			L2State:         models.StationState(derefStr(l2s, "locked")),
+			L3State:         models.StationState(derefStr(l3s, "locked")),
+			StrengthenState: models.StationState(derefStr(strS, "locked")),
+			ReviseState:     models.StationState(derefStr(revS, "locked")),
+			ReviseUnlocked:  ru,
+			TotalAttempts:   at,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 // GET /concepts/{id}/questions?level=level1

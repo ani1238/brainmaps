@@ -118,6 +118,25 @@ function mapQuestion(q: ApiQuestion): Question {
 
 // ─── API calls ────────────────────────────────────────────────────────────────
 
+export interface ApiConceptDetail {
+  id: string;
+  subjectKey: string;
+  chapterId: string;
+  chapterName: string;
+  chapterNumber: number;
+  name: string;
+  recap: string;
+  progress?: ApiProgress | null;
+}
+
+export async function fetchConcept(conceptId: string): Promise<ApiConceptDetail> {
+  const res = await fetch(
+    `${API_BASE}/concepts/${conceptId}?student=${STUDENT_ID}`
+  );
+  if (!res.ok) throw new Error(`fetchConcept ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
 export async function fetchChapters(subjectKey: string): Promise<ApiChapter[]> {
   const res = await fetch(`${API_BASE}/chapters?subject=${subjectKey}`);
   if (!res.ok) throw new Error(`fetchChapters ${res.status}: ${await res.text()}`);

@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { GridBackground } from '@/components/GridBackground';
 import { LeftRail } from '@/components/LeftRail';
 import { QuestionScreen } from '@/components/QuestionScreen';
 import { COLORS, SUBJECTS } from '@/lib/tokens';
 import { RECALL_QUESTIONS, RECALL_CONCEPT_INFO as QUEUE_INFO, CONCEPT_BY_ID, CONCEPT_RECALL_IDX, CHAPTER_DATA } from '@/data/dummy';
+import { fetchConcept, fetchQuestions, type ApiConceptDetail } from '@/lib/api';
 import type { Question } from '@/types';
 
 // Generic active recall question for concepts that don't have a specific one
@@ -36,16 +37,35 @@ function SingleConceptRecall({ conceptId }: { conceptId: string }) {
   const router = useRouter();
   const [finished, setFinished] = useState(false);
 
-  const concept = CONCEPT_BY_ID[conceptId];
-  const subjectKey = concept?.subjectKey ?? 'sci';
-  const chapterId = concept?.chapterId ?? 'sci_ch1';
-  const subject = SUBJECTS.find(s => s.key === subjectKey);
-  const chapter = CHAPTER_DATA[subjectKey]?.find(ch => ch.id === chapterId);
+  // Local demo concept (only the old c1xx/s2xx IDs live here)
+  const localConcept = CONCEPT_BY_ID[conceptId];
+
+  // Real concept + revise question fetched from the DB
+  const [apiConcept, setApiConcept] = useState<ApiConceptDetail | null>(null);
+  const [apiQuestion, setApiQuestion] = useState<Question | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchConcept(conceptId)
+      .then(c => { if (!cancelled) setApiConcept(c); })
+      .catch(() => {});
+    fetchQuestions(conceptId, 'revise')
+      .then(qs => { if (!cancelled && qs.length > 0) setApiQuestion(qs[0]); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [conceptId]);
+
+  // ── Display fields: prefer the live DB concept, then local demo data ──────
+  const conceptName = apiConcept?.name ?? localConcept?.name ?? 'this concept';
+  const subjectKey  = apiConcept?.subjectKey ?? localConcept?.subjectKey ?? 'science';
+  const subject     = SUBJECTS.find(s => s.key === subjectKey);
+  const chapterName = apiConcept?.chapterName
+    ?? CHAPTER_DATA[localConcept?.subjectKey ?? '']?.find(ch => ch.id === localConcept?.chapterId)?.name
+    ?? 'Chapter';
 
   const recallIdx = CONCEPT_RECALL_IDX[conceptId];
-  const question: Question = recallIdx !== undefined
-    ? RECALL_QUESTIONS[recallIdx]
-    : makeGenericRecall(concept?.name ?? 'this concept');
+  const question: Question = apiQuestion
+    ?? (recallIdx !== undefined ? RECALL_QUESTIONS[recallIdx] : makeGenericRecall(conceptName));
 
   if (finished) {
     return (
@@ -64,7 +84,7 @@ function SingleConceptRecall({ conceptId }: { conceptId: string }) {
             <div className="text-5xl mb-4">⚡</div>
             <h2 className="text-2xl font-extrabold mb-2" style={{ color: '#1c1917' }}>Nailed it! ⚡</h2>
             <p className="text-sm mb-2" style={{ color: '#78716c' }}>
-              <strong style={{ color: '#1c1917' }}>{concept?.name}</strong>
+              <strong style={{ color: '#1c1917' }}>{conceptName}</strong>
             </p>
             <p className="text-sm mb-6" style={{ color: '#78716c' }}>
               Great work! You won't see this one again for 3 weeks ✨
@@ -101,7 +121,7 @@ function SingleConceptRecall({ conceptId }: { conceptId: string }) {
             <div className="text-xs font-bold mb-1" style={{ color: subject?.color ?? COLORS.science }}>
               {subject?.label ?? 'Science'} · Test yourself 🎯
             </div>
-            <h2 className="text-xl font-extrabold mb-3" style={{ color: '#1c1917' }}>{concept?.name}</h2>
+            <h2 className="text-xl font-extrabold mb-3" style={{ color: '#1c1917' }}>{conceptName}</h2>
 
             <div
               className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-bold mb-5"
@@ -123,7 +143,7 @@ function SingleConceptRecall({ conceptId }: { conceptId: string }) {
 
           <div>
             <div className="text-xs font-bold mb-2" style={{ color: '#78716c' }}>Chapter</div>
-            <div className="text-sm font-semibold" style={{ color: '#44403c' }}>{chapter?.name ?? 'Chapter'}</div>
+            <div className="text-sm font-semibold" style={{ color: '#44403c' }}>{chapterName}</div>
           </div>
         </div>
 
@@ -135,7 +155,7 @@ function SingleConceptRecall({ conceptId }: { conceptId: string }) {
           >
             <QuestionScreen
               question={question}
-              conceptName={concept?.name ?? 'Concept'}
+              conceptName={conceptName}
               chapterName="Active Recall · Step 2"
               subjectName={subject?.label ?? 'Science'}
               subjectColor={subject?.color ?? COLORS.science}

@@ -25,6 +25,7 @@ func NewRouter() http.Handler {
 		// Curriculum + progress
 		r.Get("/chapters", handlers.GetChapters)
 		r.Get("/concepts", handlers.GetConcepts)
+		r.Get("/concepts/{id}", handlers.GetConcept)
 		r.Get("/concepts/{id}/questions", handlers.GetConceptQuestions)
 
 		// Session flow

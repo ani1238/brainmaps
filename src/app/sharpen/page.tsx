@@ -13,8 +13,8 @@ import { splitStations } from '@/data/society';
 import { STATION_LABELS } from '@/lib/tokens';
 import type { QuestionLevel } from '@/types';
 import {
-  isLiveConcept, fetchQuestions, startSession, completeSession, getSession,
-  type SubmitAnswer, type SessionResult, type AnswerFeedback,
+  fetchConcept, fetchQuestions, startSession, completeSession, getSession,
+  type SubmitAnswer, type SessionResult, type AnswerFeedback, type ApiConceptDetail,
 } from '@/lib/api';
 import type { Question } from '@/types';
 
@@ -119,29 +119,46 @@ const NEXT_LEVEL: Partial<Record<QuestionLevel, QuestionLevel>> = {
 function SharpenContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const conceptId = searchParams.get('conceptId') ?? 'c104';
+  const conceptIdParam = searchParams.get('conceptId');
+  const conceptId = conceptIdParam ?? 'c104';
   const level = (searchParams.get('level') as QuestionLevel | null) ?? null;
 
-  const conceptWithLoc = CONCEPT_BY_ID[conceptId];
-  const concept = conceptWithLoc ?? CONCEPT_BY_ID['c104'];
-  const subjectKey = concept?.subjectKey ?? 'sci';
-  const chapterId = concept?.chapterId ?? 'sci_ch1';
-  const subject = SUBJECTS.find(s => s.key === subjectKey);
-  const chapter = CHAPTER_DATA[subjectKey]?.find(ch => ch.id === chapterId);
-  const detail = CONCEPT_DETAILS[concept?.id ?? ''] ?? DEFAULT_CONCEPT_DETAIL;
+  // Local dummy concept — only the old demo concepts (c1xx, s2xx) live here.
+  const localConcept = CONCEPT_BY_ID[conceptId];
+  const localDetail = CONCEPT_DETAILS[conceptId] ?? DEFAULT_CONCEPT_DETAIL;
+
+  // Real concept details fetched from the DB (name, subject, chapter, recap).
+  const [apiConcept, setApiConcept] = useState<ApiConceptDetail | null>(null);
+
+  // ── Display fields: prefer the live DB concept, then local demo data ──────
+  const conceptName  = apiConcept?.name ?? localConcept?.name ?? 'Concept';
+  const subjectKey   = apiConcept?.subjectKey ?? localConcept?.subjectKey ?? 'science';
+  const subject      = SUBJECTS.find(s => s.key === subjectKey);
+  const chapterName  = apiConcept?.chapterName
+    ?? CHAPTER_DATA[localConcept?.subjectKey ?? '']?.find(ch => ch.id === localConcept?.chapterId)?.name
+    ?? 'Chapter';
+  const recap        = apiConcept?.recap || localDetail.recap;
+  const masteryState = (apiConcept?.progress?.state ?? localConcept?.state ?? 'WEAK') as keyof typeof MASTERY_MAP;
 
   const stationLabel = level ? LEVEL_TO_STATION_LABEL[level] : null;
-  const backToMapHref = concept?.id ? `/brain-map?conceptId=${concept.id}` : '/brain-map';
+  const backToMapHref = `/brain-map?conceptId=${conceptId}`;
 
-  // ── Questions: try API first, fall back to local dummy ──────────────────
-  const localQuestions: Question[] = (() => {
-    const all = CONCEPT_QUESTIONS[concept?.id ?? ''] ?? SESSION_QUESTIONS;
-    return level ? (splitStations(all)[level] ?? []) : all;
-  })();
+  // Local fallback questions. NEVER leak the demo photosynthesis set into a
+  // real DB concept — only use it when no explicit conceptId was supplied
+  // (the "Fix 5 tricky bits" demo button on the brain map).
+  function localFallbackQuestions(): Question[] {
+    const local = CONCEPT_QUESTIONS[conceptId];
+    if (local) return level ? (splitStations(local)[level] ?? []) : local;
+    if (!conceptIdParam) {
+      return level ? (splitStations(SESSION_QUESTIONS)[level] ?? []) : SESSION_QUESTIONS;
+    }
+    return [];
+  }
 
-  const [questions, setQuestions] = useState<Question[]>(localQuestions);
+  const [questions, setQuestions] = useState<Question[]>(localFallbackQuestions);
   // questionsFromApi = true means question IDs exist in the DB and we can call the API session
   const [questionsFromApi, setQuestionsFromApi] = useState(false);
+  const [loadingQuestions, setLoadingQuestions] = useState(false);
 
   // ── Question tracking ───────────────────────────────────────────────────
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -155,6 +172,15 @@ function SharpenContent() {
   const [apiResult, setApiResult] = useState<SessionResult | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Fetch the real concept's details (name, subject, chapter, recap) from the DB.
+  useEffect(() => {
+    let cancelled = false;
+    fetchConcept(conceptId)
+      .then(c => { if (!cancelled) setApiConcept(c); })
+      .catch(() => {}); // not a DB concept — keep local/demo display
+    return () => { cancelled = true; };
+  }, [conceptId]);
+
   // Re-run whenever the student moves to a different level or concept
   useEffect(() => {
     // 1. Reset all per-session state so the new level starts fresh
@@ -167,14 +193,16 @@ function SharpenContent() {
     sessionIdRef.current = null;
     if (pollRef.current) clearInterval(pollRef.current);
 
-    // 2. Show local questions immediately as a fallback (prevents blank screen)
-    const all = CONCEPT_QUESTIONS[conceptId] ?? SESSION_QUESTIONS;
-    setQuestions(level ? (splitStations(all)[level] ?? []) : all);
+    // 2. Show local fallback immediately (empty for real DB concepts — the
+    //    API fills it in below; this prevents a flash of wrong questions)
+    setQuestions(localFallbackQuestions());
     setQuestionsFromApi(false);
 
-    if (!isLiveConcept(conceptId) || !level) return;
+    if (!level) return;
 
-    // 3. Fetch real DB questions, then start a fresh session
+    // 3. Always try the DB first. If it has questions, use them and start a
+    //    graded session. Otherwise keep whatever local fallback we have.
+    setLoadingQuestions(true);
     fetchQuestions(conceptId, level)
       .then(apiQs => {
         if (apiQs.length > 0) {
@@ -185,7 +213,8 @@ function SharpenContent() {
         return null;
       })
       .then(id => { if (id) sessionIdRef.current = id; })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoadingQuestions(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conceptId, level]);
 
@@ -251,7 +280,7 @@ function SharpenContent() {
     if (pollRef.current) clearInterval(pollRef.current);
     // Start a fresh session (only if questions are backed by the DB)
     if (questionsFromApi && level) {
-      startSession(concept!.id, level)
+      startSession(conceptId, level)
         .then(id => { sessionIdRef.current = id; })
         .catch(() => {});
     }
@@ -328,7 +357,7 @@ function SharpenContent() {
                   {passed ? 'Great work! 🎉' : 'Here\'s what to focus on'}
                 </h2>
                 <p className="text-xs mb-4" style={{ color: '#a8a29e' }}>
-                  {concept?.name} · {apiResult ? (apiResult.aiGrading ? 'provisional score' : 'AI score') : 'MCQ score'}: {pct}%
+                  {conceptName} · {apiResult ? (apiResult.aiGrading ? 'provisional score' : 'AI score') : 'MCQ score'}: {pct}%
                 </p>
               </>
             )}
@@ -342,7 +371,7 @@ function SharpenContent() {
               {/* Passed + next level exists → go to next station */}
               {!aiStillGrading && passed && nextLevel && (
                 <button
-                  onClick={() => router.push(`/sharpen?conceptId=${concept?.id}&level=${nextLevel}`)}
+                  onClick={() => router.push(`/sharpen?conceptId=${conceptId}&level=${nextLevel}`)}
                   className="px-6 py-3 rounded-xl font-bold text-sm text-white"
                   style={{ background: COLORS.strong }}
                 >
@@ -383,8 +412,53 @@ function SharpenContent() {
     );
   }
 
+  const masteryInfo = MASTERY_MAP[masteryState] ?? MASTERY_MAP.WEAK;
+
+  // While the DB questions are loading (or none exist yet), don't render a
+  // question — this is what used to flash the demo photosynthesis set.
+  if (questions.length === 0) {
+    return (
+      <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
+        <GridBackground />
+        <LeftRail />
+        <main className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            {loadingQuestions ? (
+              <>
+                <div className="flex justify-center mb-3">
+                  <div className="flex gap-1.5">
+                    {[0, 1, 2].map(i => (
+                      <div key={i} className="w-2.5 h-2.5 rounded-full animate-bounce"
+                        style={{ background: COLORS.indigo, animationDelay: `${i * 150}ms` }} />
+                    ))}
+                  </div>
+                </div>
+                <p className="text-sm font-semibold" style={{ color: '#78716c' }}>
+                  Loading {conceptName}…
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="text-4xl mb-3">📭</div>
+                <p className="text-sm font-semibold mb-4" style={{ color: '#78716c' }}>
+                  No questions yet for {stationLabel ? `${stationLabel} of ` : ''}{conceptName}.
+                </p>
+                <button
+                  onClick={() => router.push(backToMapHref)}
+                  className="px-5 py-2.5 rounded-xl font-bold text-sm"
+                  style={{ background: 'rgba(0,0,0,0.05)', color: '#78716c' }}
+                >
+                  ← Back to Brain Map
+                </button>
+              </>
+            )}
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   const question = questions[currentIdx];
-  const masteryInfo = MASTERY_MAP[concept?.state ?? 'WEAK'];
 
   return (
     <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
@@ -411,9 +485,9 @@ function SharpenContent() {
             </button>
 
             <div className="text-[10px] font-bold tracking-widest mb-1" style={{ color: subject?.color ?? COLORS.science }}>
-              {subject?.label.toUpperCase() ?? 'SCIENCE'} · {chapter?.name ?? 'Chapter'}
+              {subject?.label.toUpperCase() ?? 'SCIENCE'} · {chapterName}
             </div>
-            <h2 className="text-xl font-extrabold mb-2" style={{ color: '#1c1917' }}>{concept?.name}</h2>
+            <h2 className="text-xl font-extrabold mb-2" style={{ color: '#1c1917' }}>{conceptName}</h2>
 
             {stationLabel && (
               <div
@@ -438,7 +512,7 @@ function SharpenContent() {
 
             <div className="text-xs font-bold mb-2" style={{ color: '#78716c' }}>Quick reminder</div>
             <p className="text-sm leading-relaxed" style={{ color: '#44403c' }}>
-              {detail.recap.split('. ').slice(0, 2).join('. ')}.
+              {recap.split('. ').slice(0, 2).join('. ')}.
             </p>
           </div>
 
@@ -476,8 +550,8 @@ function SharpenContent() {
           >
             <QuestionScreen
               question={question}
-              conceptName={concept?.name ?? 'Concept'}
-              chapterName={chapter?.name ?? 'Chapter'}
+              conceptName={conceptName}
+              chapterName={chapterName}
               subjectName={subject?.label ?? 'Science'}
               subjectColor={subject?.color ?? COLORS.science}
               current={currentIdx}
