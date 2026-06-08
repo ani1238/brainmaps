@@ -381,6 +381,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
         const sd = subjectDisplay(selectedSubject);
         return (
           <RightPanel
+            key={selectedConcept.id}
             concept={selectedConcept}
             chapterName={chapterName}
             subjectName={sd.label}
