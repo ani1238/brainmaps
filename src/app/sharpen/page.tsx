@@ -13,8 +13,8 @@ import { splitStations } from '@/data/society';
 import { STATION_LABELS } from '@/lib/tokens';
 import type { QuestionLevel } from '@/types';
 import {
-  fetchConcept, fetchQuestions, startSession, completeSession, getSession,
-  type SubmitAnswer, type SessionResult, type AnswerFeedback, type ApiConceptDetail,
+  fetchConcept, fetchQuestions, startSession, completeSession, getSession, fetchToday,
+  type SubmitAnswer, type SessionResult, type AnswerFeedback, type ApiConceptDetail, type ApiTodayItem,
 } from '@/lib/api';
 import type { Question } from '@/types';
 
@@ -573,12 +573,115 @@ function SharpenContent() {
   );
 }
 
+// ── Today's Fix report ────────────────────────────────────────────────────────
+// Shown when /sharpen is opened with no conceptId — lists the concepts whose
+// levels need a retry, and links straight into the flagged level.
+
+const FIX_STATIONS: { key: 'l1State' | 'l2State' | 'l3State' | 'strengthenState'; level: QuestionLevel; label: string }[] = [
+  { key: 'l1State',         level: 'level1',     label: 'Level 1' },
+  { key: 'l2State',         level: 'level2',     label: 'Level 2' },
+  { key: 'l3State',         level: 'level3',     label: 'Level 3' },
+  { key: 'strengthenState', level: 'strengthen', label: 'Strengthen' },
+];
+
+function flaggedStation(item: ApiTodayItem) {
+  const p = item.progress;
+  if (p?.l1State === 'needs_fixing') return FIX_STATIONS[0];
+  if (p?.l2State === 'needs_fixing') return FIX_STATIONS[1];
+  if (p?.l3State === 'needs_fixing') return FIX_STATIONS[2];
+  if (p?.strengthenState === 'needs_fixing') return FIX_STATIONS[3];
+  return FIX_STATIONS[0]; // fallback — start from Level 1
+}
+
+function TodaysFixReport() {
+  const router = useRouter();
+  const [items, setItems] = useState<ApiTodayItem[] | null>(null);
+
+  useEffect(() => {
+    fetchToday().then(t => setItems(t.fixQueue)).catch(() => setItems([]));
+  }, []);
+
+  function start(item: ApiTodayItem) {
+    const st = flaggedStation(item);
+    router.push(`/sharpen?conceptId=${item.id}&level=${st.level}`);
+  }
+
+  return (
+    <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
+      <GridBackground />
+      <LeftRail />
+      <main className="flex-1 overflow-y-auto flex items-start justify-center py-10">
+        <div className="w-full max-w-xl px-6">
+          <div className="mb-1 text-xs font-bold tracking-widest" style={{ color: COLORS.weak }}>🔧 TODAY'S FIX</div>
+          <h1 className="text-3xl font-extrabold" style={{ color: '#1c1917' }}>
+            {items === null ? 'Loading your fixes…'
+              : items.length === 0 ? 'Nothing to fix right now 🎉'
+              : `${items.length} ${items.length === 1 ? 'thing' : 'things'} to fix`}
+          </h1>
+          <p className="text-sm mt-1 mb-5" style={{ color: '#78716c' }}>
+            {items && items.length > 0
+              ? 'These levels scored below the mark — give them another go.'
+              : items?.length === 0 ? 'Great work — no levels are flagged. Keep practising in the Brain Map.' : ''}
+          </p>
+
+          {items && items.length > 0 && (
+            <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(0,0,0,0.08)' }}>
+              {items.map((item, i) => {
+                const st = flaggedStation(item);
+                const subj = subjectDisplay(item.subjectKey.startsWith('english') ? 'english' : item.subjectKey);
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => start(item)}
+                    className="w-full flex items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-black/[0.03]"
+                    style={{ borderTop: i === 0 ? 'none' : '1px solid rgba(0,0,0,0.06)' }}
+                  >
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: COLORS.weak }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-sm" style={{ color: '#1c1917' }}>{item.name}</div>
+                      <div className="text-xs" style={{ color: '#78716c' }}>{subj.label}</div>
+                      <div className="text-xs font-semibold mt-0.5" style={{ color: COLORS.weak }}>
+                        {st.label} needs a retry
+                      </div>
+                    </div>
+                    <div className="text-lg flex-shrink-0" style={{ color: '#a8a29e' }}>›</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {items && items.length > 0 && (
+            <button
+              onClick={() => start(items[0])}
+              className="w-full mt-4 py-3.5 rounded-xl font-bold text-sm text-white transition-all hover:opacity-90 active:scale-[0.98]"
+              style={{ background: COLORS.weak, boxShadow: '0 4px 16px rgba(249,115,22,0.3)' }}
+            >
+              Start fixing →
+            </button>
+          )}
+
+          <button
+            onClick={() => router.push('/brain-map')}
+            className="w-full mt-3 py-3 rounded-xl font-bold text-sm"
+            style={{ background: 'rgba(0,0,0,0.05)', color: '#78716c' }}
+          >
+            ← Back to Brain Map
+          </button>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 // Reads the URL params and passes a key to SharpenContent so it fully
 // remounts whenever the concept or level changes — no stale state bleeds
-// between stations.
+// between stations. With no conceptId, shows the Today's Fix report instead.
 function SharpenKeyBridge() {
   const params = useSearchParams();
-  const key = `${params.get('conceptId') ?? 'c104'}_${params.get('level') ?? 'none'}`;
+  const conceptId = params.get('conceptId');
+  if (!conceptId) return <TodaysFixReport />;
+  const key = `${conceptId}_${params.get('level') ?? 'none'}`;
   return <SharpenContent key={key} />;
 }
 
