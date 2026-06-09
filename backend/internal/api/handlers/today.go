@@ -82,16 +82,16 @@ func scanProgressRows(rows interface {
 	Next() bool
 	Scan(...any) error
 }, studentID string, withRevise bool) []models.ConceptWithProgress {
-	var result []models.ConceptWithProgress
+	result := []models.ConceptWithProgress{} // non-nil so JSON encodes [] not null
 	for rows.Next() {
 		var cwp models.ConceptWithProgress
 		var (
-			ema                        float64
-			state                      models.MasteryState
+			ema                       float64
+			state                     models.MasteryState
 			l1s, l2s, l3s, strS, revS string
-			revUnlocked                bool
-			attempts                   int
-			lastAt                     interface{}
+			revUnlocked               bool
+			attempts                  int
+			lastAt                    interface{}
 		)
 
 		var err error

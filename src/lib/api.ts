@@ -181,7 +181,10 @@ export interface ApiToday {
 export async function fetchToday(): Promise<ApiToday> {
   const res = await fetch(`${API_BASE}/today?student=${STUDENT_ID}`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`fetchToday ${res.status}: ${await res.text()}`);
-  return res.json();
+  const d = await res.json();
+  // The API returns null (not []) for empty queues — coerce so callers can
+  // safely read .length / .map without crashing.
+  return { fixQueue: d.fixQueue ?? [], reviseQueue: d.reviseQueue ?? [] };
 }
 
 export async function fetchConcepts(chapterId: string): Promise<Concept[]> {

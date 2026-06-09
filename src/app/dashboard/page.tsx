@@ -23,8 +23,10 @@ export default function DashboardPage() {
   const [dash, setDash] = useState<ApiDashboard | null>(null);
   const [today, setToday] = useState<ApiToday | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dateLabel, setDateLabel] = useState(''); // client-only → avoids SSR hydration mismatch
 
   useEffect(() => {
+    setDateLabel(todayLabel());
     Promise.all([fetchDashboard(), fetchToday()])
       .then(([d, t]) => { setDash(d); setToday(t); })
       .catch(() => {})
@@ -63,7 +65,7 @@ export default function DashboardPage() {
         >
           <div className="flex justify-between items-start gap-6 mb-4">
             <div>
-              <div className="text-xs font-bold mb-0.5" style={{ color: '#78716c' }}>{todayLabel()}</div>
+              <div className="text-xs font-bold mb-0.5" style={{ color: '#78716c' }}>{dateLabel}</div>
               <div className="flex items-baseline gap-3 flex-wrap">
                 <h1 className="text-3xl font-extrabold leading-none" style={{ color: '#1c1917' }}>Hi {STUDENT_NAME}! 👋</h1>
                 <span className="text-sm" style={{ color: '#78716c' }}>About {estMin} minutes today</span>
