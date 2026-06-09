@@ -596,6 +596,32 @@ func recomputeSession(ctx context.Context, sessionID string) {
 			), studentID, conceptID)
 		}
 	}
+
+	updateStreak(ctx, studentID)
+}
+
+// updateStreak bumps the student's daily streak on session completion.
+//   - same day as last activity → no change
+//   - exactly the next day      → streak_days + 1
+//   - any larger gap (or first) → reset to 1
+//
+// streak_best tracks the all-time high.
+func updateStreak(ctx context.Context, studentID string) {
+	db.Pool.Exec(ctx, `
+		UPDATE students
+		SET streak_days = CASE
+		        WHEN streak_last_date = current_date           THEN streak_days
+		        WHEN streak_last_date = current_date - 1        THEN streak_days + 1
+		        ELSE 1
+		    END,
+		    streak_best = GREATEST(streak_best, CASE
+		        WHEN streak_last_date = current_date           THEN streak_days
+		        WHEN streak_last_date = current_date - 1        THEN streak_days + 1
+		        ELSE 1
+		    END),
+		    streak_last_date = current_date
+		WHERE id = $1
+	`, studentID)
 }
 
 // stationStateCol returns the concept_progress column name for a given station.

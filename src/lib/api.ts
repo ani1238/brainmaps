@@ -143,6 +143,47 @@ export async function fetchChapters(subjectKey: string): Promise<ApiChapter[]> {
   return res.json();
 }
 
+// ─── Dashboard / progress summary ─────────────────────────────────────────────
+
+export interface ApiDashboard {
+  streak: { days: number; best: number; activeDays: number };
+  mastery: {
+    strong: number; developing: number; weak: number;
+    veryWeak: number; notStarted: number; total: number;
+  };
+  subjects: { key: string; total: number; attempted: number; strong: number; pct: number }[];
+  activity: { date: string; sessions: number }[];
+  improving: { conceptId: string; name: string; delta: number }[];
+  needsAttention: { conceptId: string; name: string; note: string }[];
+}
+
+export async function fetchDashboard(): Promise<ApiDashboard> {
+  const res = await fetch(`${API_BASE}/dashboard?student=${STUDENT_ID}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`fetchDashboard ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+// ─── Today's plan (Fix queue + Revise queue) ──────────────────────────────────
+
+export interface ApiTodayItem {
+  id: string;
+  subjectKey: string;
+  chapterId: string;
+  name: string;
+  progress?: ApiProgress | null;
+}
+
+export interface ApiToday {
+  fixQueue: ApiTodayItem[];
+  reviseQueue: ApiTodayItem[];
+}
+
+export async function fetchToday(): Promise<ApiToday> {
+  const res = await fetch(`${API_BASE}/today?student=${STUDENT_ID}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`fetchToday ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
 export async function fetchConcepts(chapterId: string): Promise<Concept[]> {
   const res = await fetch(
     `${API_BASE}/concepts?chapter=${chapterId}&student=${STUDENT_ID}`,

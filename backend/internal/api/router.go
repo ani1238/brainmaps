@@ -33,8 +33,9 @@ func NewRouter() http.Handler {
 		r.Post("/sessions/{id}/complete", handlers.CompleteSession)
 		r.Get("/sessions/{id}", handlers.GetSession)
 
-		// Today's plan
+		// Today's plan + dashboard/progress summary
 		r.Get("/today", handlers.GetToday)
+		r.Get("/dashboard", handlers.GetDashboard)
 	})
 
 	return r

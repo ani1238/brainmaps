@@ -1,12 +1,15 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { fetchToday, fetchDashboard } from '@/lib/api';
 
 interface LeftRailProps {
   studentName?: string;
   studentClass?: number;
   board?: string;
+  // Optional overrides; when omitted, LeftRail fetches real counts itself.
   streak?: number;
   sharpenCount?: number;
   recallCount?: number;
@@ -17,17 +20,30 @@ const NAV = [
   { href: '/brain-map', label: 'Brain Map',    icon: '🧠' },
   { href: '/sharpen',   label: 'Fix it',       icon: '✨' },
   { href: '/recall',    label: 'Test myself',  icon: '🎯' },
+  { href: '/progress',  label: 'My Progress',  icon: '📈' },
 ];
 
 export function LeftRail({
   studentName = 'Aarav',
   studentClass = 6,
   board = 'CBSE',
-  streak = 12,
-  sharpenCount = 5,
-  recallCount = 3,
+  streak: streakProp,
+  sharpenCount: sharpenProp,
+  recallCount: recallProp,
 }: LeftRailProps) {
   const pathname = usePathname();
+
+  // Live counts — fetched once so the sidebar is correct on every page.
+  const [live, setLive] = useState<{ fix: number; revise: number; streak: number } | null>(null);
+  useEffect(() => {
+    Promise.all([fetchToday(), fetchDashboard()])
+      .then(([t, d]) => setLive({ fix: t.fixQueue.length, revise: t.reviseQueue.length, streak: d.streak.days }))
+      .catch(() => {});
+  }, []);
+
+  const sharpenCount = sharpenProp ?? live?.fix ?? 0;
+  const recallCount = recallProp ?? live?.revise ?? 0;
+  const streak = streakProp ?? live?.streak ?? 0;
 
   return (
     <aside
