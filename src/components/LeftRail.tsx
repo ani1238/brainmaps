@@ -16,10 +16,10 @@ interface LeftRailProps {
 }
 
 const NAV = [
-  { href: '/dashboard', label: 'Home',         icon: '🏠' },
-  { href: '/brain-map', label: 'Brain Map',    icon: '🧠' },
-  { href: '/sharpen',   label: 'Fix it',       icon: '✨' },
-  { href: '/recall',    label: 'Test myself',  icon: '🎯' },
+  { href: '/dashboard', label: 'Today',        icon: '🏠' },
+  { href: '/brain-map', label: 'Map',          icon: '🧠' },
+  { href: '/sharpen',   label: "Today's Fix",  icon: '🔧' },
+  { href: '/recall',    label: 'Revise',       icon: '🔄' },
   { href: '/progress',  label: 'My Progress',  icon: '📈' },
 ];
 
@@ -131,7 +131,7 @@ export function LeftRail({
             style={{ background: '#f97316' }}
           />
           <span className="text-sm" style={{ color: '#44403c' }}>
-            <strong>{sharpenCount}</strong> things to fix
+            <strong>{sharpenCount}</strong> to fix
           </span>
         </div>
 
@@ -141,7 +141,7 @@ export function LeftRail({
             style={{ background: '#22c55e' }}
           />
           <span className="text-sm" style={{ color: '#44403c' }}>
-            <strong>{recallCount}</strong> quick checks
+            <strong>{recallCount}</strong> to revise
           </span>
         </div>
 
