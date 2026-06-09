@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/models"
@@ -254,6 +256,85 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 		questions = append(questions, *qMap[id])
 	}
 
+	// ── Adaptive retry ──────────────────────────────────────────────────────
+	// When a student re-attempts a level they previously failed (station ==
+	// needs_fixing) and we know their weak concepts, serve a set focused on
+	// those weaknesses instead of the full level.
+	if student := r.URL.Query().Get("student"); student != "" {
+		if col := levelStateCol(level); col != "" {
+			var state string
+			var weak []string
+			err := db.Pool.QueryRow(r.Context(), fmt.Sprintf(
+				`SELECT %s, weak_concepts FROM concept_progress WHERE student_id = $1 AND concept_id = $2`, col,
+			), student, conceptID).Scan(&state, &weak)
+			if err == nil && state == "needs_fixing" && len(weak) > 0 {
+				questions = selectRetryQuestions(questions, weak)
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(questions)
+}
+
+// levelStateCol maps a question level to its concept_progress station column.
+func levelStateCol(level string) string {
+	switch level {
+	case "level1":
+		return "l1_state"
+	case "level2":
+		return "l2_state"
+	case "level3":
+		return "l3_state"
+	case "strengthen":
+		return "strengthen_state"
+	case "revise":
+		return "revise_state"
+	default:
+		return ""
+	}
+}
+
+// selectRetryQuestions builds an adaptive retry set: questions whose
+// key_concepts overlap the student's weak concepts come first; if too few
+// match, the set is padded with the remaining questions so the retry still has
+// enough to be meaningful.
+//
+// FUTURE: when fewer than `target` existing questions cover the weak concepts,
+// this is where we'll generate fresh AI questions targeting `weak` instead of
+// padding with unrelated ones — the rest of the pipeline already keys off
+// key_concepts, so generated questions just need to be tagged the same way.
+func selectRetryQuestions(all []models.Question, weak []string) []models.Question {
+	const target = 5
+
+	weakSet := map[string]bool{}
+	for _, w := range weak {
+		weakSet[strings.ToLower(strings.TrimSpace(w))] = true
+	}
+
+	var matched, rest []models.Question
+	for _, q := range all {
+		hit := false
+		for _, kc := range q.KeyConcepts {
+			if weakSet[strings.ToLower(strings.TrimSpace(kc))] {
+				hit = true
+				break
+			}
+		}
+		if hit {
+			matched = append(matched, q)
+		} else {
+			rest = append(rest, q)
+		}
+	}
+
+	if len(matched) == 0 {
+		return all // nothing tagged / no overlap — fall back to the full level
+	}
+
+	out := matched
+	for i := 0; len(out) < target && i < len(rest); i++ {
+		out = append(out, rest[i])
+	}
+	return out
 }

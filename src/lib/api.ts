@@ -201,8 +201,10 @@ export async function fetchQuestions(
   conceptId: string,
   level: QuestionLevel
 ): Promise<Question[]> {
+  // Pass the student so the backend can serve an adaptive set on a retry
+  // (a level the student previously failed) — targeting their weak concepts.
   const res = await fetch(
-    `${API_BASE}/concepts/${conceptId}/questions?level=${level}`
+    `${API_BASE}/concepts/${conceptId}/questions?level=${level}&student=${STUDENT_ID}`
   );
   if (!res.ok) throw new Error(`fetchQuestions ${res.status}: ${await res.text()}`);
   const data: ApiQuestion[] = await res.json();

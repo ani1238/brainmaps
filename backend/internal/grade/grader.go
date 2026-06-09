@@ -78,7 +78,7 @@ func GradeOpenAnswers(sessionID string) {
 	rows.Close()
 
 	if len(answers) == 0 {
-		recomputeSession(ctx, sessionID)
+		recomputeSession(ctx, sessionID, nil)
 		return
 	}
 
@@ -97,7 +97,7 @@ func GradeOpenAnswers(sessionID string) {
 		}
 	}
 
-	results, err := gradeBatch(ctx, shared.ConceptName, shared.SubjectKey, shared.ChapterName, items)
+	results, weakConcepts, err := gradeBatch(ctx, shared.ConceptName, shared.SubjectKey, shared.ChapterName, items)
 	if err != nil {
 		log.Printf("[grade] session %s: AI grading failed: %v", sessionID, err)
 		// Hard failure: neutral 0.5 for every answer so the session still completes
@@ -116,8 +116,9 @@ func GradeOpenAnswers(sessionID string) {
 		`, results[i].Score, results[i].Feedback, a.AnswerID)
 	}
 
-	// 4. Recompute session score including AI grades and update concept_progress
-	recomputeSession(ctx, sessionID)
+	// 4. Recompute session score + store the weakness profile (AI's weak concepts
+	//    unioned with the key_concepts of every wrong answer).
+	recomputeSession(ctx, sessionID, weakConcepts)
 }
 
 // gradeItem is one answer to grade inside a batch call.
@@ -136,14 +137,15 @@ const (
 	openAIModel = "gpt-5.4-mini"             // OpenAI Responses API (fallback)
 )
 
-// gradeBatch grades every answer in a session with ONE model call.
-// It always returns a slice aligned to `items` (gaps filled with a neutral
-// score) on success, or a non-nil error on a hard failure.
-func gradeBatch(ctx context.Context, conceptName, subjectKey, chapterName string, items []gradeItem) ([]GradeResult, error) {
+// gradeBatch grades every answer in a session with ONE model call, and in the
+// same call asks the model which key ideas the student is weak in. It always
+// returns a grades slice aligned to `items` (gaps filled with a neutral score)
+// plus the weak-concept tags, or a non-nil error on a hard failure.
+func gradeBatch(ctx context.Context, conceptName, subjectKey, chapterName string, items []gradeItem) ([]GradeResult, []string, error) {
 	prompt := buildBatchPrompt(conceptName, subjectKey, chapterName, items)
 	text, err := callModel(ctx, prompt)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var parsed struct {
@@ -152,9 +154,10 @@ func gradeBatch(ctx context.Context, conceptName, subjectKey, chapterName string
 			Score    float64 `json:"score"`
 			Feedback string  `json:"feedback"`
 		} `json:"grades"`
+		WeakConcepts []string `json:"weakConcepts"`
 	}
 	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
-		return nil, fmt.Errorf("parse batch json: %w", err)
+		return nil, nil, fmt.Errorf("parse batch json: %w", err)
 	}
 
 	// Align results to input order (1-based index); fill any gaps with neutral 0.5.
@@ -176,7 +179,7 @@ func gradeBatch(ctx context.Context, conceptName, subjectKey, chapterName string
 		}
 		results[idx] = GradeResult{Score: score, Feedback: g.Feedback}
 	}
-	return results, nil
+	return results, parsed.WeakConcepts, nil
 }
 
 // callModel sends the grading prompt through the configured providers in order
@@ -408,9 +411,13 @@ func buildBatchPrompt(conceptName, subjectKey, chapterName string, items []grade
 	sb.WriteString("3. Give one clear, actionable tip for next time (what to remember or how to improve).\n")
 	sb.WriteString("Rules: each sentence ≤ 20 words; tone is warm and encouraging; use simple Class 6 language; no bullet points.\n\n")
 
-	sb.WriteString("Return ONLY valid JSON (no markdown, no extra text). Include one entry per answer, in order, ")
-	sb.WriteString("using the ANSWER number as \"index\":\n")
-	sb.WriteString(`{"grades":[{"index":1,"score":0.XX,"feedback":"sentence1 sentence2 sentence3"}]}`)
+	sb.WriteString("ALSO identify what the student is WEAK in: the specific key ideas or sub-skills they did NOT")
+	sb.WriteString(" demonstrate across these answers (draw from the 'Key ideas' / 'Marking guide' above). List them")
+	sb.WriteString(" as short lowercase tags (2–5 words each) in \"weakConcepts\". Use [] if they did everything well.\n\n")
+
+	sb.WriteString("Return ONLY valid JSON (no markdown, no extra text). One \"grades\" entry per answer, in order, ")
+	sb.WriteString("using the ANSWER number as \"index\", plus a session-wide \"weakConcepts\" array:\n")
+	sb.WriteString(`{"grades":[{"index":1,"score":0.XX,"feedback":"sentence1 sentence2 sentence3"}],"weakConcepts":["tag one","tag two"]}`)
 
 	return sb.String()
 }
@@ -494,11 +501,11 @@ func scoringRubric(qType string) string {
 func RecomputeSession(sessionID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	recomputeSession(ctx, sessionID)
+	recomputeSession(ctx, sessionID, nil) // MCQ-only: weakness derived from wrong answers' tags
 }
 
 // recomputeSession averages MCQ + AI scores and updates concept_progress.
-func recomputeSession(ctx context.Context, sessionID string) {
+func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 	var studentID, conceptID, station string
 	var mcqCorrect, mcqTotal int
 	db.Pool.QueryRow(ctx, `
@@ -597,6 +604,7 @@ func recomputeSession(ctx context.Context, sessionID string) {
 		}
 	}
 
+	storeWeakConcepts(ctx, sessionID, studentID, conceptID, aiWeak)
 	updateStreak(ctx, studentID)
 }
 
@@ -622,6 +630,56 @@ func updateStreak(ctx context.Context, studentID string) {
 		    streak_last_date = current_date
 		WHERE id = $1
 	`, studentID)
+}
+
+// storeWeakConcepts records the student's weak points for this concept — the
+// key_concepts of every question they got wrong this session, unioned with the
+// AI's own weak-concept assessment. The adaptive retry reads these to pick
+// targeted questions. Recomputed each session (latest weakness wins).
+func storeWeakConcepts(ctx context.Context, sessionID, studentID, conceptID string, aiWeak []string) {
+	set := map[string]bool{}
+	add := func(s string) {
+		s = strings.TrimSpace(strings.ToLower(s))
+		if s != "" {
+			set[s] = true
+		}
+	}
+	for _, w := range aiWeak {
+		add(w)
+	}
+
+	// key_concepts of every wrong answer (wrong MCQ/tap, or open answer < 0.6).
+	rows, err := db.Pool.Query(ctx, `
+		SELECT q.key_concepts
+		FROM session_answers sa
+		JOIN questions q ON q.id = sa.question_id
+		WHERE sa.session_id = $1
+		  AND (
+		        (sa.chosen_option IS NOT NULL AND sa.is_correct = false)
+		     OR (sa.ai_score IS NOT NULL AND sa.ai_score < 0.6)
+		  )
+	`, sessionID)
+	if err == nil {
+		for rows.Next() {
+			var kc []string
+			if rows.Scan(&kc) == nil {
+				for _, k := range kc {
+					add(k)
+				}
+			}
+		}
+		rows.Close()
+	}
+
+	weak := make([]string, 0, len(set))
+	for k := range set {
+		weak = append(weak, k)
+	}
+
+	db.Pool.Exec(ctx, `
+		UPDATE concept_progress SET weak_concepts = $3
+		WHERE student_id = $1 AND concept_id = $2
+	`, studentID, conceptID, weak)
 }
 
 // stationStateCol returns the concept_progress column name for a given station.
