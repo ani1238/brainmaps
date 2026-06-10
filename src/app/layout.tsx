@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import { AuthGate } from "@/components/AuthGate";
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -27,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${plusJakarta.variable} ${jetbrainsMono.variable} h-full`}>
       <body className="min-h-full" style={{ fontFamily: "var(--font-jakarta), system-ui, sans-serif" }}>
-        {children}
+        <AuthGate>{children}</AuthGate>
       </body>
     </html>
   );

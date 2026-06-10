@@ -3,22 +3,40 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { GridBackground } from '@/components/GridBackground';
-
-const CLASSES = [3, 4, 5, 6, 7];
-const BOARDS = ['CBSE', 'ICSE'] as const;
+import { loginStudent } from '@/lib/api';
+import { saveProfile } from '@/lib/storage';
 
 export default function LoginPage() {
   const router = useRouter();
   const [name, setName] = useState('');
-  const [cls, setCls] = useState<number | null>(null);
-  const [board, setBoard] = useState<'CBSE' | 'ICSE' | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const canSubmit = name.trim().length >= 2 && cls !== null && board !== null;
+  const canSubmit = name.trim().length >= 2 && !loading;
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
-    router.push('/dashboard');
+    setLoading(true);
+    setError('');
+    try {
+      const student = await loginStudent(name);
+      saveProfile({
+        id: student.id,
+        name: student.name,
+        class: student.grade as 3 | 4 | 5 | 6 | 7,
+        board: student.board,
+        streak: 0,
+        lastActiveDate: '',
+        enrolledSubjects: ['sci', 'soc', 'eng'],
+        onboardingComplete: true,
+      });
+      router.push('/dashboard');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open this student profile.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -74,8 +92,7 @@ export default function LoginPage() {
             Welcome to BrainMaps.
           </h1>
           <p className="text-sm leading-relaxed mb-8" style={{ color: '#78716c' }}>
-            We measure what's stuck and what slipped. No logins, no passwords —
-            just your name, class, and board.
+            Enter your name to open your student profile. Passwords will be added later.
           </p>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-6">
@@ -100,56 +117,14 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* Class + Board */}
-            <div className="grid grid-cols-2 gap-5">
-              <div>
-                <label className="block text-[10px] font-bold tracking-widest mb-2" style={{ color: '#78716c' }}>CLASS</label>
-                <div className="flex gap-2">
-                  {CLASSES.map(n => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setCls(n)}
-                      className="w-10 h-10 rounded-full font-bold text-base transition-all"
-                      style={{
-                        border: `1.5px solid ${cls === n ? '#4F46E5' : 'rgba(0,0,0,0.15)'}`,
-                        background: cls === n ? 'rgba(79,70,229,0.1)' : '#fff',
-                        color: cls === n ? '#4F46E5' : '#44403c',
-                        boxShadow: cls === n ? '0 0 0 3px rgba(79,70,229,0.1)' : 'none',
-                      }}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold tracking-widest mb-2" style={{ color: '#78716c' }}>BOARD</label>
-                <div className="flex gap-2.5">
-                  {BOARDS.map(b => (
-                    <button
-                      key={b}
-                      type="button"
-                      onClick={() => setBoard(b)}
-                      className="px-4 py-2.5 rounded-xl font-bold text-sm transition-all"
-                      style={{
-                        border: `1.5px solid ${board === b ? '#4F46E5' : 'rgba(0,0,0,0.15)'}`,
-                        background: board === b ? 'rgba(79,70,229,0.1)' : '#fff',
-                        color: board === b ? '#4F46E5' : '#44403c',
-                        boxShadow: board === b ? '0 0 0 3px rgba(79,70,229,0.1)' : 'none',
-                      }}
-                    >
-                      {b}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+            {error && <p className="text-sm font-semibold" style={{ color: '#dc2626' }}>{error}</p>}
+            <p className="text-xs" style={{ color: '#78716c' }}>
+              Test profiles: <strong>Aarav</strong>, <strong>Meera</strong>, or <strong>Kabir</strong>.
+            </p>
 
             {/* Submit */}
             <div className="flex justify-between items-center pt-2">
-              <span className="text-[11px] font-mono" style={{ color: '#78716c' }}>~30 sec · no password</span>
+              <span className="text-[11px] font-mono" style={{ color: '#78716c' }}>name only · no password</span>
               <button
                 type="submit"
                 disabled={!canSubmit}
@@ -161,7 +136,7 @@ export default function LoginPage() {
                   boxShadow: canSubmit ? '0 4px 20px rgba(79,70,229,0.35)' : 'none',
                 }}
               >
-                Open my Brain →
+                {loading ? 'Opening…' : 'Open my Brain →'}
               </button>
             </div>
           </form>

@@ -22,6 +22,9 @@ func NewRouter() http.Handler {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
+		// Passwordless student identity (name matching for now)
+		r.Post("/students/login", handlers.LoginStudent)
+
 		// Curriculum + progress
 		r.Get("/chapters", handlers.GetChapters)
 		r.Get("/concepts", handlers.GetConcepts)

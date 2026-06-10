@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { fetchToday, fetchDashboard } from '@/lib/api';
+import { clearProfile, getProfile } from '@/lib/storage';
 
 interface LeftRailProps {
   studentName?: string;
@@ -24,14 +25,20 @@ const NAV = [
 ];
 
 export function LeftRail({
-  studentName = 'Aarav',
-  studentClass = 6,
-  board = 'CBSE',
+  studentName,
+  studentClass,
+  board,
   streak: streakProp,
   sharpenCount: sharpenProp,
   recallCount: recallProp,
 }: LeftRailProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [profile, setProfile] = useState<ReturnType<typeof getProfile>>(null);
+  useEffect(() => setProfile(getProfile()), []);
+  const displayName = studentName ?? profile?.name ?? 'Student';
+  const displayClass = studentClass ?? profile?.class ?? 6;
+  const displayBoard = board ?? profile?.board ?? 'CBSE';
 
   // Live counts — fetched once so the sidebar is correct on every page.
   const [live, setLive] = useState<{ fix: number; revise: number; streak: number } | null>(null);
@@ -86,10 +93,21 @@ export function LeftRail({
         style={{ background: 'rgba(79,70,229,0.06)', border: '1px solid rgba(79,70,229,0.12)' }}
       >
         <div className="text-[10px] font-bold tracking-widest mb-1" style={{ color: '#78716c' }}>STUDENT</div>
-        <div className="font-bold text-base" style={{ color: '#1c1917' }}>{studentName}</div>
+        <div className="font-bold text-base" style={{ color: '#1c1917' }}>{displayName}</div>
         <div className="text-[11px] font-mono" style={{ color: '#78716c' }}>
-          Class {studentClass} · {board}
+          Class {displayClass} · {displayBoard}
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            clearProfile();
+            router.push('/');
+          }}
+          className="mt-2 text-[11px] font-semibold"
+          style={{ color: '#4F46E5' }}
+        >
+          Switch student
+        </button>
       </div>
 
       {/* Nav */}

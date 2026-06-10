@@ -7,12 +7,16 @@
  */
 
 import type { Concept, Question, QuestionLevel } from '@/types';
+import { getProfile } from '@/lib/storage';
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? 'https://brainmaps-api.fly.dev/api/v1';
 
-// Hardcoded test student — swap for real auth session once login is wired up
-export const STUDENT_ID = '11111111-1111-1111-1111-111111111111';
+function studentId(): string {
+  const id = getProfile()?.id;
+  if (!id) throw new Error('No active student');
+  return id;
+}
 
 // Concept IDs that live in the real backend (soc_chB — Tapestry of the Past)
 export const LIVE_CONCEPT_IDS = new Set([
@@ -21,6 +25,24 @@ export const LIVE_CONCEPT_IDS = new Set([
 
 export function isLiveConcept(conceptId: string): boolean {
   return LIVE_CONCEPT_IDS.has(conceptId);
+}
+
+export interface ApiStudent {
+  id: string;
+  name: string;
+  grade: number;
+  board: 'CBSE' | 'ICSE';
+  createdAt: string;
+}
+
+export async function loginStudent(name: string): Promise<ApiStudent> {
+  const res = await fetch(`${API_BASE}/students/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
 
 // ─── Backend response shapes ──────────────────────────────────────────────────
@@ -131,7 +153,7 @@ export interface ApiConceptDetail {
 
 export async function fetchConcept(conceptId: string): Promise<ApiConceptDetail> {
   const res = await fetch(
-    `${API_BASE}/concepts/${conceptId}?student=${STUDENT_ID}`
+    `${API_BASE}/concepts/${conceptId}?student=${studentId()}`
   );
   if (!res.ok) throw new Error(`fetchConcept ${res.status}: ${await res.text()}`);
   return res.json();
@@ -158,7 +180,7 @@ export interface ApiDashboard {
 }
 
 export async function fetchDashboard(): Promise<ApiDashboard> {
-  const res = await fetch(`${API_BASE}/dashboard?student=${STUDENT_ID}`, { cache: 'no-store' });
+  const res = await fetch(`${API_BASE}/dashboard?student=${studentId()}`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`fetchDashboard ${res.status}: ${await res.text()}`);
   return res.json();
 }
@@ -179,7 +201,7 @@ export interface ApiToday {
 }
 
 export async function fetchToday(): Promise<ApiToday> {
-  const res = await fetch(`${API_BASE}/today?student=${STUDENT_ID}`, { cache: 'no-store' });
+  const res = await fetch(`${API_BASE}/today?student=${studentId()}`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`fetchToday ${res.status}: ${await res.text()}`);
   const d = await res.json();
   // The API returns null (not []) for empty queues — coerce so callers can
@@ -189,7 +211,7 @@ export async function fetchToday(): Promise<ApiToday> {
 
 export async function fetchConcepts(chapterId: string): Promise<Concept[]> {
   const res = await fetch(
-    `${API_BASE}/concepts?chapter=${chapterId}&student=${STUDENT_ID}`,
+    `${API_BASE}/concepts?chapter=${chapterId}&student=${studentId()}`,
     { next: { revalidate: 0 } } // always fresh
   );
   if (!res.ok) throw new Error(`fetchConcepts ${res.status}: ${await res.text()}`);
@@ -204,7 +226,7 @@ export async function fetchQuestions(
 ): Promise<Question[]> {
   // Pass the student so the backend can serve an adaptive set on a retry
   // (a level the student previously failed) — targeting their weak concepts.
-  const params = new URLSearchParams({ level, student: STUDENT_ID });
+  const params = new URLSearchParams({ level, student: studentId() });
   excludeQuestionIds.forEach(id => params.append('exclude', id));
   const res = await fetch(`${API_BASE}/concepts/${conceptId}/questions?${params}`);
   if (!res.ok) throw new Error(`fetchQuestions ${res.status}: ${await res.text()}`);
@@ -243,7 +265,7 @@ export async function startSession(
   const res = await fetch(`${API_BASE}/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ studentId: STUDENT_ID, conceptId, station }),
+    body: JSON.stringify({ studentId: studentId(), conceptId, station }),
   });
   if (!res.ok) throw new Error(`startSession ${res.status}`);
   const { sessionId } = await res.json();
