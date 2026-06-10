@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"time"
@@ -244,6 +245,14 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Shuffle once so equally-ranked questions (same type, same tag) vary
+	// between attempts — a retry stays focused on the weak tags but isn't a
+	// verbatim repeat. The selection functions themselves stay deterministic
+	// so they remain unit-testable.
+	rand.Shuffle(len(questions), func(i, j int) {
+		questions[i], questions[j] = questions[j], questions[i]
+	})
 
 	// Every attempt is compact and varied. Retries additionally focus on the
 	// student's worst active weak tags; revise sessions silently re-test
