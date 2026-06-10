@@ -164,6 +164,49 @@ func TestSelectRetryQuestionsAvoidsRecentWithoutMatchingWeakTags(t *testing.T) {
 	}
 }
 
+func TestEnsureDifferentAttemptUsesAlternateQuestion(t *testing.T) {
+	selected := []models.Question{
+		{ID: "q1", Type: models.MCQ},
+		{ID: "q2", Type: models.Descriptive},
+		{ID: "q3", Type: models.QuestionType("FIX_IT")},
+	}
+	all := append(append([]models.Question(nil), selected...), models.Question{
+		ID: "q4", Type: models.QuestionType("SPOT_IT"),
+	})
+
+	got := ensureDifferentAttempt(selected, all, []string{"q1", "q2", "q3"})
+	gotIDs := []string{got[0].ID, got[1].ID, got[2].ID}
+	want := []string{"q1", "q2", "q4"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
+	}
+}
+
+func TestEnsureDifferentAttemptRotatesSmallPool(t *testing.T) {
+	selected := []models.Question{
+		{ID: "q1", Type: models.MCQ},
+		{ID: "q2", Type: models.QuestionType("FIX_IT")},
+		{ID: "q3", Type: models.QuestionType("SPOT_IT")},
+	}
+
+	got := ensureDifferentAttempt(selected, selected, []string{"q1", "q2", "q3"})
+	gotIDs := []string{got[0].ID, got[1].ID, got[2].ID}
+	want := []string{"q2", "q3", "q1"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
+	}
+}
+
+func TestEnsureDifferentAttemptKeepsAlreadyDifferentSelection(t *testing.T) {
+	selected := []models.Question{{ID: "q2"}, {ID: "q1"}}
+	got := ensureDifferentAttempt(selected, selected, []string{"q1", "q2"})
+	gotIDs := []string{got[0].ID, got[1].ID}
+	want := []string{"q2", "q1"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
+	}
+}
+
 func TestSelectDiverseQuestions(t *testing.T) {
 	questions := []models.Question{
 		{ID: "mcq1", Type: models.MCQ},

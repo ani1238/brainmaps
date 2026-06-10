@@ -271,12 +271,14 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 				if recent == nil {
 					recent = make(map[string]bool)
 				}
-				for _, questionID := range r.URL.Query()["exclude"] {
+				previousOrder := r.URL.Query()["exclude"]
+				for _, questionID := range previousOrder {
 					if questionID != "" {
 						recent[questionID] = true
 					}
 				}
 				selected = selectRetryQuestions(questions, weak, recent)
+				selected = ensureDifferentAttempt(selected, questions, previousOrder)
 			}
 		}
 	}
@@ -380,6 +382,35 @@ func selectRetryQuestions(all []models.Question, weak []string, recent map[strin
 
 	unseen := selectDiverseQuestionPools(target, unseenMatched, unseenRest)
 	return appendRecentQuestions(unseen, target, recentMatched, recentRest)
+}
+
+// ensureDifferentAttempt prevents an identical retry. Repeats are allowed when
+// the pool is small, but the next attempt must replace at least one question or
+// present the same small pool in a different order.
+func ensureDifferentAttempt(selected, all []models.Question, previous []string) []models.Question {
+	if len(selected) < 2 || len(selected) != len(previous) {
+		return selected
+	}
+	for i, q := range selected {
+		if q.ID != previous[i] {
+			return selected
+		}
+	}
+
+	previousSet := make(map[string]bool, len(previous))
+	for _, id := range previous {
+		previousSet[id] = true
+	}
+	for _, candidate := range all {
+		if !previousSet[candidate.ID] {
+			out := append([]models.Question(nil), selected...)
+			out[len(out)-1] = candidate
+			return out
+		}
+	}
+
+	out := append([]models.Question(nil), selected[1:]...)
+	return append(out, selected[0])
 }
 
 func appendRecentQuestions(selected []models.Question, target int, recent ...[]models.Question) []models.Question {
