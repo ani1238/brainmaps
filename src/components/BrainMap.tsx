@@ -375,8 +375,8 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
               `/brain-map?conceptId=${selectedConcept.id}`,
             ))}
             onStartRecall={() => router.push(assessmentHref(
-              '/recall',
-              { conceptId: selectedConcept.id },
+              '/sharpen',
+              { conceptId: selectedConcept.id, level: 'revise' },
               `/brain-map?conceptId=${selectedConcept.id}`,
             ))}
           />

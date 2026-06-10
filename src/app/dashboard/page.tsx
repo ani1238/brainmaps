@@ -186,7 +186,7 @@ export default function DashboardPage() {
               </div>
               {reviseCount > 0 && (
                 <button
-                  onClick={() => router.push(assessmentHref('/recall', {
+                  onClick={() => router.push(assessmentHref('/sharpen', {
                     conceptId: today!.reviseQueue[0].id,
                     level: 'revise',
                   }, '/dashboard'))}

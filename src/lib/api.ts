@@ -193,6 +193,11 @@ export interface ApiTodayItem {
   chapterId: string;
   name: string;
   progress?: ApiProgress | null;
+  reviseSchedule?: {
+    intervalDays: number;
+    nextDueAt: string;
+    lastDoneAt?: string;
+  } | null;
 }
 
 export interface ApiToday {

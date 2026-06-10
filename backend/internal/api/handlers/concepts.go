@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/models"
@@ -61,7 +62,7 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 			attempts                  *int
 			lastAt                    interface{}
 			intervalDays              *int
-			nextDue                   interface{}
+			nextDue                   *time.Time
 		)
 		if err := rows.Scan(
 			&cwp.ID, &cwp.SubjectKey, &cwp.ChapterID, &cwp.Name, &cwp.OrderIdx,
@@ -91,6 +92,14 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 				ReviseState:     models.StationState(derefStr(revS, "locked")),
 				ReviseUnlocked:  ru,
 				TotalAttempts:   *attempts,
+			}
+		}
+		if intervalDays != nil && nextDue != nil {
+			cwp.ReviseSchedule = &models.ReviseSchedule{
+				StudentID:    studentID,
+				ConceptID:    cwp.ID,
+				IntervalDays: *intervalDays,
+				NextDueAt:    *nextDue,
 			}
 		}
 

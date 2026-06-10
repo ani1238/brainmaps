@@ -604,9 +604,47 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 			), studentID, conceptID)
 		}
 	}
+	if models.StationKey(station) == models.StationRevise {
+		updateReviseSchedule(ctx, studentID, conceptID, sessionScore >= 0.80)
+	}
 
 	storeWeakConcepts(ctx, sessionID, studentID, conceptID, aiWeak)
 	updateStreak(ctx, studentID)
+}
+
+var recallIntervals = []int{1, 3, 7, 21, 60}
+
+func nextRecallInterval(current int, passed bool) int {
+	if !passed {
+		return recallIntervals[0]
+	}
+	for _, interval := range recallIntervals {
+		if interval > current {
+			return interval
+		}
+	}
+	return recallIntervals[len(recallIntervals)-1]
+}
+
+func updateReviseSchedule(ctx context.Context, studentID, conceptID string, passed bool) {
+	var current int
+	if err := db.Pool.QueryRow(ctx, `
+		SELECT interval_days
+		FROM revise_schedule
+		WHERE student_id = $1 AND concept_id = $2
+	`, studentID, conceptID).Scan(&current); err != nil {
+		current = 0
+	}
+	next := nextRecallInterval(current, passed)
+	db.Pool.Exec(ctx, `
+		INSERT INTO revise_schedule
+		  (student_id, concept_id, interval_days, next_due_at, last_done_at)
+		VALUES ($1, $2, $3, now() + ($3 * interval '1 day'), now())
+		ON CONFLICT (student_id, concept_id) DO UPDATE
+		  SET interval_days = EXCLUDED.interval_days,
+		      next_due_at = EXCLUDED.next_due_at,
+		      last_done_at = EXCLUDED.last_done_at
+	`, studentID, conceptID, next)
 }
 
 // updateStreak bumps the student's daily streak on session completion.

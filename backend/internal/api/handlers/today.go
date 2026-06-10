@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/models"
@@ -55,9 +56,11 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		       rs.interval_days, rs.next_due_at
 		FROM revise_schedule rs
 		JOIN concepts c ON c.id = rs.concept_id
-		LEFT JOIN concept_progress cp
+		JOIN concept_progress cp
 		       ON cp.concept_id = rs.concept_id AND cp.student_id = rs.student_id
-		WHERE rs.student_id = $1 AND rs.next_due_at <= now()
+		WHERE rs.student_id = $1
+		  AND rs.next_due_at <= now()
+		  AND cp.state = 'STRONG'
 		ORDER BY rs.next_due_at ASC
 		LIMIT 5
 	`, studentID)
@@ -97,7 +100,7 @@ func scanProgressRows(rows interface {
 		var err error
 		if withRevise {
 			var intervalDays *int
-			var nextDue interface{}
+			var nextDue *time.Time
 			err = rows.Scan(
 				&cwp.ID, &cwp.SubjectKey, &cwp.ChapterID, &cwp.Name, &cwp.OrderIdx,
 				&ema, &state,
@@ -105,6 +108,14 @@ func scanProgressRows(rows interface {
 				&attempts, &lastAt,
 				&intervalDays, &nextDue,
 			)
+			if err == nil && intervalDays != nil && nextDue != nil {
+				cwp.ReviseSchedule = &models.ReviseSchedule{
+					StudentID:    studentID,
+					ConceptID:    cwp.ID,
+					IntervalDays: *intervalDays,
+					NextDueAt:    *nextDue,
+				}
+			}
 		} else {
 			err = rows.Scan(
 				&cwp.ID, &cwp.SubjectKey, &cwp.ChapterID, &cwp.Name, &cwp.OrderIdx,

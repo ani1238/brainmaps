@@ -177,7 +177,7 @@ export function RightPanel({
     const level = STATION_TO_LEVEL[key];
     const returnTo = `/brain-map?conceptId=${concept.id}`;
     if (key === 'keep_it_fresh') {
-      router.push(assessmentHref('/recall', { conceptId: concept.id, level }, returnTo));
+      router.push(assessmentHref('/sharpen', { conceptId: concept.id, level }, returnTo));
     } else {
       router.push(assessmentHref('/sharpen', { conceptId: concept.id, level }, returnTo));
     }
