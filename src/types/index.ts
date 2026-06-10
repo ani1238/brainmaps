@@ -50,6 +50,11 @@ export interface Concept {
   strengthenState?: string;
   reviseState?: string;
   reviseUnlocked?: boolean;
+  reviseSchedule?: {
+    intervalDays: number;
+    nextDueAt: string;
+    lastDoneAt?: string;
+  } | null;
 }
 
 // ─── Primitives ───────────────────────────────────────────────────────────────

@@ -41,6 +41,7 @@ function apiDetailToConcept(c: ApiConceptDetail): Concept {
     strengthenState: c.progress?.strengthenState,
     reviseState: c.progress?.reviseState,
     reviseUnlocked: c.progress?.reviseUnlocked,
+    reviseSchedule: c.reviseSchedule,
   };
 }
 

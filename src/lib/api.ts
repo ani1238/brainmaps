@@ -75,7 +75,11 @@ interface ApiConcept {
   name: string;
   orderIdx: number;
   progress?: ApiProgress | null;
-  reviseSchedule?: { nextDueAt: string } | null;
+  reviseSchedule?: {
+    intervalDays: number;
+    nextDueAt: string;
+    lastDoneAt?: string;
+  } | null;
 }
 
 interface ApiOption {
@@ -118,6 +122,7 @@ function mapConcept(c: ApiConcept): Concept {
     strengthenState: c.progress?.strengthenState,
     reviseState: c.progress?.reviseState,
     reviseUnlocked: c.progress?.reviseUnlocked,
+    reviseSchedule: c.reviseSchedule,
   };
 }
 
@@ -149,6 +154,7 @@ export interface ApiConceptDetail {
   name: string;
   recap: string;
   progress?: ApiProgress | null;
+  reviseSchedule?: ApiTodayItem['reviseSchedule'];
 }
 
 export async function fetchConcept(conceptId: string): Promise<ApiConceptDetail> {
@@ -203,6 +209,7 @@ export interface ApiTodayItem {
 export interface ApiToday {
   fixQueue: ApiTodayItem[];
   reviseQueue: ApiTodayItem[];
+  upcomingReviseQueue: ApiTodayItem[];
 }
 
 export async function fetchToday(): Promise<ApiToday> {
@@ -211,7 +218,11 @@ export async function fetchToday(): Promise<ApiToday> {
   const d = await res.json();
   // The API returns null (not []) for empty queues — coerce so callers can
   // safely read .length / .map without crashing.
-  return { fixQueue: d.fixQueue ?? [], reviseQueue: d.reviseQueue ?? [] };
+  return {
+    fixQueue: d.fixQueue ?? [],
+    reviseQueue: d.reviseQueue ?? [],
+    upcomingReviseQueue: d.upcomingReviseQueue ?? [],
+  };
 }
 
 export async function fetchConcepts(chapterId: string): Promise<Concept[]> {

@@ -253,6 +253,7 @@ export function RightPanel({
           status={stations[activeTab]}
           questions={tabQuestions}
           loading={loadingQ}
+          reviseSchedule={concept.reviseSchedule}
           onStart={() => startStation(activeTab)}
         />
       </div>
@@ -262,11 +263,12 @@ export function RightPanel({
 
 // ─── A single station's panel ─────────────────────────────────────────────────
 
-function StationTab({ stationKey, status, questions, loading, onStart }: {
+function StationTab({ stationKey, status, questions, loading, reviseSchedule, onStart }: {
   stationKey: StationKey;
   status: StationStatus;
   questions: { type: string }[];
   loading?: boolean;
+  reviseSchedule?: Concept['reviseSchedule'];
   onStart: () => void;
 }) {
   const number = STATION_NUMBERS[stationKey];
@@ -284,6 +286,21 @@ function StationTab({ stationKey, status, questions, loading, onStart }: {
 
   const locked = status === 'locked';
   const isDone = status === 'done';
+  const nextDue = reviseSchedule?.nextDueAt ? new Date(reviseSchedule.nextDueAt) : null;
+  const lastDone = reviseSchedule?.lastDoneAt ? new Date(reviseSchedule.lastDoneAt) : null;
+  const today = new Date();
+  const isFutureReview = stationKey === 'keep_it_fresh' && nextDue && nextDue > today;
+  const revisedToday = lastDone
+    ? lastDone.getFullYear() === today.getFullYear()
+      && lastDone.getMonth() === today.getMonth()
+      && lastDone.getDate() === today.getDate()
+    : false;
+  const dueDate = nextDue
+    ? new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(nextDue)
+    : null;
+  const daysUntilDue = nextDue
+    ? Math.max(1, Math.ceil((nextDue.getTime() - today.getTime()) / 86_400_000))
+    : null;
 
   return (
     <div className="p-5 flex flex-col gap-5">
@@ -315,6 +332,27 @@ function StationTab({ stationKey, status, questions, loading, onStart }: {
 
       {/* Blurb */}
       <p className="text-sm leading-relaxed" style={{ color: '#44403c' }}>{info.blurb}</p>
+
+      {stationKey === 'keep_it_fresh' && reviseSchedule && (
+        <div
+          className="rounded-xl p-4"
+          style={{ background: `${COLORS.strong}0d`, border: `1px solid ${COLORS.strong}35` }}
+        >
+          <div className="text-xs font-extrabold" style={{ color: '#166534' }}>
+            {revisedToday ? '✓ Revised today' : isFutureReview ? '✓ Review complete' : 'Review due'}
+          </div>
+          {dueDate && (
+            <div className="font-bold text-sm mt-1" style={{ color: '#1c1917' }}>
+              Next review: {dueDate}
+            </div>
+          )}
+          {isFutureReview && daysUntilDue && (
+            <div className="text-xs mt-0.5" style={{ color: '#78716c' }}>
+              in {daysUntilDue} {daysUntilDue === 1 ? 'day' : 'days'} · Day {reviseSchedule.intervalDays} review
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Questions summary */}
       {loading ? (
@@ -358,7 +396,13 @@ function StationTab({ stationKey, status, questions, loading, onStart }: {
             boxShadow: `0 4px 16px ${status === 'needsFixing' ? COLORS.weak : isDone ? COLORS.strong : COLORS.indigo}40`,
           }}
         >
-          {status === 'needsFixing' ? `Fix ${label} →` : isDone ? `Review ${label}` : `Start ${label} →`}
+          {status === 'needsFixing'
+            ? `Fix ${label} →`
+            : isFutureReview
+              ? 'Practise early'
+              : isDone
+                ? `Review ${label}`
+                : `Start ${label} →`}
         </button>
       )}
     </div>

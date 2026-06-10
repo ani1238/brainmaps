@@ -149,6 +149,17 @@ function SharpenContent() {
   const recap        = apiConcept?.recap || localDetail.recap;
   const masteryState = (apiConcept?.progress?.state ?? localConcept?.state ?? 'WEAK') as keyof typeof MASTERY_MAP;
 
+  function returnFromSession(passed: boolean) {
+    if (passed && level === 'revise' && conceptId && returnTarget.href === '/recall') {
+      sessionStorage.setItem('brainmaps:revise-completed', JSON.stringify({
+        conceptId,
+        conceptName,
+        completedAt: new Date().toISOString(),
+      }));
+    }
+    router.push(returnTarget.href);
+  }
+
   const stationLabel = level ? LEVEL_TO_STATION_LABEL[level] : null;
 
   // Local fallback questions. ONLY the old demo concepts have local questions;
@@ -407,7 +418,7 @@ function SharpenContent() {
               {/* Passed + no next level → all stations done, back to map */}
               {!aiStillGrading && passed && !nextLevel && (
                 <button
-                  onClick={() => router.push(returnTarget.href)}
+                  onClick={() => returnFromSession(true)}
                   className="px-6 py-3 rounded-xl font-bold text-sm text-white"
                   style={{ background: COLORS.strong }}
                 >
@@ -425,7 +436,7 @@ function SharpenContent() {
                 </button>
               )}
               <button
-                onClick={() => router.push(returnTarget.href)}
+                onClick={() => returnFromSession(passed && !aiStillGrading)}
                 className="px-6 py-3 rounded-xl font-bold text-sm"
                 style={{ background: 'rgba(0,0,0,0.05)', color: '#78716c' }}
               >
