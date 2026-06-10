@@ -256,10 +256,9 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 		questions = append(questions, *qMap[id])
 	}
 
-	// ── Adaptive retry ──────────────────────────────────────────────────────
-	// When a student re-attempts a level they previously failed (station ==
-	// needs_fixing) and we know their weak concepts, serve a set focused on
-	// those weaknesses instead of the full level.
+	// Every attempt is compact and varied. Retries additionally prioritize
+	// questions whose key concepts overlap the student's recorded weaknesses.
+	selected := selectDiverseQuestions(questions, nil, 6)
 	if student := r.URL.Query().Get("student"); student != "" {
 		if col := levelStateCol(level); col != "" {
 			var state string
@@ -268,13 +267,13 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 				`SELECT %s, weak_concepts FROM concept_progress WHERE student_id = $1 AND concept_id = $2`, col,
 			), student, conceptID).Scan(&state, &weak)
 			if err == nil && state == "needs_fixing" && len(weak) > 0 {
-				questions = selectRetryQuestions(questions, weak)
+				selected = selectRetryQuestions(questions, weak)
 			}
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(questions)
+	json.NewEncoder(w).Encode(selected)
 }
 
 // levelStateCol maps a question level to its concept_progress station column.
@@ -295,17 +294,16 @@ func levelStateCol(level string) string {
 	}
 }
 
-// selectRetryQuestions builds an adaptive retry set: questions whose
-// key_concepts overlap the student's weak concepts come first; if too few
-// match, the set is padded with the remaining questions so the retry still has
-// enough to be meaningful.
+// selectRetryQuestions builds a six-question adaptive retry set. Questions
+// matching the student's weak concepts are selected first with as much type
+// variety as possible, then non-matching questions pad any remaining slots.
 //
 // FUTURE: when fewer than `target` existing questions cover the weak concepts,
 // this is where we'll generate fresh AI questions targeting `weak` instead of
 // padding with unrelated ones — the rest of the pipeline already keys off
 // key_concepts, so generated questions just need to be tagged the same way.
 func selectRetryQuestions(all []models.Question, weak []string) []models.Question {
-	const target = 5
+	const target = 6
 
 	weakSet := map[string]bool{}
 	for _, w := range weak {
@@ -332,17 +330,51 @@ func selectRetryQuestions(all []models.Question, weak []string) []models.Questio
 	}
 
 	if len(matched) == 0 {
-		return all // nothing tagged / no overlap — fall back to the full level
+		return selectDiverseQuestions(all, nil, target)
 	}
 
-	if len(matched) >= target {
-		return matched[:target]
+	return selectDiverseQuestions(matched, rest, target)
+}
+
+// selectDiverseQuestions selects from primary before fallback, taking one
+// question per available type before repeating a type. This keeps sessions
+// compact while exposing the student to the broadest available interaction mix.
+func selectDiverseQuestions(primary, fallback []models.Question, target int) []models.Question {
+	if target <= 0 {
+		return []models.Question{}
 	}
 
-	out := make([]models.Question, 0, min(target, len(all)))
-	out = append(out, matched...)
-	for i := 0; len(out) < target && i < len(rest); i++ {
-		out = append(out, rest[i])
+	out := make([]models.Question, 0, min(target, len(primary)+len(fallback)))
+	selected := make(map[string]bool)
+	usedTypes := make(map[models.QuestionType]bool)
+
+	addNewTypes := func(pool []models.Question) {
+		for _, q := range pool {
+			if len(out) >= target {
+				return
+			}
+			if !selected[q.ID] && !usedTypes[q.Type] {
+				out = append(out, q)
+				selected[q.ID] = true
+				usedTypes[q.Type] = true
+			}
+		}
 	}
+	fill := func(pool []models.Question) {
+		for _, q := range pool {
+			if len(out) >= target {
+				return
+			}
+			if !selected[q.ID] {
+				out = append(out, q)
+				selected[q.ID] = true
+			}
+		}
+	}
+
+	addNewTypes(primary)
+	fill(primary)
+	addNewTypes(fallback)
+	fill(fallback)
 	return out
 }
