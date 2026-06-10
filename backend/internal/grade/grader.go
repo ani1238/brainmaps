@@ -108,18 +108,25 @@ func GradeOpenAnswers(sessionID string) {
 		}
 	}
 
-	// 3. Persist each grade
+	// 3. Persist each grade. ai_graded_at is stamped only after the recompute
+	//    below, so a GetSession poll never reports "grading done" before the
+	//    station outcome (and the Passed flag derived from it) is final.
 	for i, a := range answers {
 		db.Pool.Exec(ctx, `
 			UPDATE session_answers
-			SET ai_score = $1, ai_feedback = $2, ai_graded_at = now()
+			SET ai_score = $1, ai_feedback = $2
 			WHERE id = $3
 		`, results[i].Score, results[i].Feedback, a.AnswerID)
 	}
 
-	// 4. Recompute session score + store the weakness profile (AI's weak concepts
-	//    unioned with the key_concepts of every wrong answer).
+	// 4. Recompute session score + advance the per-tag weakness lifecycle (AI's
+	//    weak concepts unioned with the key_concepts of every wrong answer).
 	recomputeSession(ctx, sessionID, weakConcepts)
+
+	db.Pool.Exec(ctx, `
+		UPDATE session_answers SET ai_graded_at = now()
+		WHERE session_id = $1 AND question_type <> 'MCQ' AND student_text IS NOT NULL
+	`, sessionID)
 }
 
 // gradeItem is one answer to grade inside a batch call.
@@ -412,9 +419,10 @@ func buildBatchPrompt(conceptName, subjectKey, chapterName string, items []grade
 	sb.WriteString("3. Give one clear, actionable tip for next time (what to remember or how to improve).\n")
 	sb.WriteString("Rules: each sentence ≤ 20 words; tone is warm and encouraging; use simple Class 6 language; no bullet points.\n\n")
 
-	sb.WriteString("ALSO identify what the student is WEAK in: the specific key ideas or sub-skills they did NOT")
-	sb.WriteString(" demonstrate across these answers (draw from the 'Key ideas' / 'Marking guide' above). List them")
-	sb.WriteString(" as short lowercase tags (2–5 words each) in \"weakConcepts\". Use [] if they did everything well.\n\n")
+	sb.WriteString("ALSO identify what the student is WEAK in: the specific key ideas they did NOT demonstrate")
+	sb.WriteString(" across these answers. Choose tags ONLY from the 'Key ideas the answer should cover' lists above,")
+	sb.WriteString(" copied verbatim in lowercase, in \"weakConcepts\". Free-form tags are not allowed.")
+	sb.WriteString(" Use [] if they did everything well or no listed idea fits.\n\n")
 
 	sb.WriteString("Return ONLY valid JSON (no markdown, no extra text). One \"grades\" entry per answer, in order, ")
 	sb.WriteString("using the ANSWER number as \"index\", plus a session-wide \"weakConcepts\" array:\n")
@@ -576,11 +584,33 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 		      updated_at      = now()
 	`, studentID, conceptID, ema, state)
 
-	// Update per-station state based on outcome
-	const unlockThreshold = 0.60
+	// Per-tag accuracy this session, the student's active weaknesses BEFORE any
+	// lifecycle updates, and whether this attempt is a retry — together they
+	// feed the tag-gated pass decision.
+	tested := sessionTagStats(ctx, sessionID)
+	activeBefore := activeWeakTags(ctx, studentID, conceptID)
+	targeted := map[string]tagStat{}
+	for _, tag := range activeBefore {
+		if st, ok := tested[tag]; ok {
+			targeted[tag] = st
+		}
+	}
+
 	curCol := stationStateCol(models.StationKey(station))
+	isRetry := false
 	if curCol != "" {
-		if sessionScore >= unlockThreshold {
+		var st string
+		if db.Pool.QueryRow(ctx, fmt.Sprintf(
+			`SELECT %s FROM concept_progress WHERE student_id = $1 AND concept_id = $2`, curCol,
+		), studentID, conceptID).Scan(&st) == nil {
+			isRetry = st == "needs_fixing"
+		}
+	}
+
+	// Update per-station state based on outcome. A retry must also demonstrate
+	// every targeted weak tag (>= 50% of its questions) — score alone can't pass.
+	if curCol != "" {
+		if levelPassGate(sessionScore, isRetry, targeted) {
 			// Passed: mark current station done and unlock the next one
 			nextSt := nextStationKey(models.StationKey(station))
 			nextCol := stationStateCol(nextSt)
@@ -608,7 +638,7 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 		updateReviseSchedule(ctx, studentID, conceptID, sessionScore >= 0.80)
 	}
 
-	storeWeakConcepts(ctx, sessionID, studentID, conceptID, aiWeak)
+	updateWeakConceptLifecycle(ctx, studentID, conceptID, sessionWeakSet(ctx, sessionID, aiWeak), tested)
 	updateStreak(ctx, studentID)
 }
 
@@ -671,15 +701,121 @@ func updateStreak(ctx context.Context, studentID string) {
 	`, studentID)
 }
 
-// storeWeakConcepts records the student's weak points for this concept — the
-// key_concepts of every question they got wrong this session, unioned with the
-// AI's own weak-concept assessment. The adaptive retry reads these to pick
-// targeted questions. Recomputed each session (latest weakness wins).
-func storeWeakConcepts(ctx context.Context, sessionID, studentID, conceptID string, aiWeak []string) {
+// ── Weak-concept lifecycle ──────────────────────────────────────────────────
+// Each (student, concept, tag) row in student_weak_concepts tracks one
+// weakness: wrong → active with wrong_count++; tested clean twice → cleared;
+// a missed spaced recheck flips cleared back to active. Untested tags are
+// never touched, so a targeted retry can't silently drop unrelated weaknesses.
+
+// normalizeTag canonicalizes a weak-concept tag (mirrors SQL lower(trim())).
+func normalizeTag(s string) string { return strings.TrimSpace(strings.ToLower(s)) }
+
+// tagStat is one tested tag's accuracy within a single session.
+type tagStat struct{ Total, Correct int }
+
+// passed reports whether the tag was demonstrated well enough this session:
+// at least half of its questions answered correctly.
+func (t tagStat) passed() bool { return t.Total > 0 && t.Correct*2 >= t.Total }
+
+// levelPassGate decides whether a session clears its station. Score must meet
+// the unlock threshold; on a retry, every targeted weak tag must also have
+// passed. First attempts have no targeted tags, so the gate degenerates to
+// score-only by construction.
+func levelPassGate(score float64, isRetry bool, targeted map[string]tagStat) bool {
+	const unlockThreshold = 0.60
+	if score < unlockThreshold {
+		return false
+	}
+	if !isRetry {
+		return true
+	}
+	for _, st := range targeted {
+		if !st.passed() {
+			return false
+		}
+	}
+	return true
+}
+
+// decideTagLifecycle splits a session's outcome into tags to mark wrong and
+// tags to credit progress on. Weakness wins: a tag both flagged weak and
+// tested-correct counts as wrong. Progress requires tested, not flagged weak,
+// and passed. Outputs are sorted for determinism.
+func decideTagLifecycle(sessionWeak map[string]bool, tested map[string]tagStat) (wrongTags, progressTags []string) {
+	for tag := range sessionWeak {
+		wrongTags = append(wrongTags, tag)
+	}
+	for tag, st := range tested {
+		if !sessionWeak[tag] && st.passed() {
+			progressTags = append(progressTags, tag)
+		}
+	}
+	sort.Strings(wrongTags)
+	sort.Strings(progressTags)
+	return wrongTags, progressTags
+}
+
+// sessionTagStats computes per-tag accuracy for the session: for every
+// key_concept of every answered question, how many of its questions were
+// answered correctly (correct MCQ/tap, or open answer >= 0.6). Only called
+// after grades are persisted, so ai_score is always set for open answers.
+func sessionTagStats(ctx context.Context, sessionID string) map[string]tagStat {
+	stats := map[string]tagStat{}
+	rows, err := db.Pool.Query(ctx, `
+		SELECT lower(trim(kc)) AS tag,
+		       COUNT(*) AS total,
+		       COUNT(*) FILTER (WHERE (sa.chosen_option IS NOT NULL AND sa.is_correct)
+		                           OR (sa.ai_score IS NOT NULL AND sa.ai_score >= 0.6)) AS correct
+		FROM session_answers sa
+		JOIN questions q ON q.id = sa.question_id
+		CROSS JOIN LATERAL unnest(q.key_concepts) AS kc
+		WHERE sa.session_id = $1 AND trim(kc) <> ''
+		GROUP BY 1
+	`, sessionID)
+	if err != nil {
+		return stats
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tag string
+		var st tagStat
+		if rows.Scan(&tag, &st.Total, &st.Correct) == nil {
+			stats[tag] = st
+		}
+	}
+	return stats
+}
+
+// activeWeakTags returns the student's active weak tags for a concept, ranked
+// worst-first. Keep the ordering in sync with activeTagsRanked in the handlers
+// package, which drives retry question selection.
+func activeWeakTags(ctx context.Context, studentID, conceptID string) []string {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT tag FROM student_weak_concepts
+		WHERE student_id = $1 AND concept_id = $2 AND status = 'active'
+		ORDER BY wrong_count DESC, last_seen_at DESC
+	`, studentID, conceptID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var tags []string
+	for rows.Next() {
+		var t string
+		if rows.Scan(&t) == nil {
+			tags = append(tags, t)
+		}
+	}
+	return tags
+}
+
+// sessionWeakSet builds the session's weakness set: the AI's weak-concept tags
+// unioned with the key_concepts of every wrong answer (wrong MCQ/tap, or open
+// answer < 0.6), normalized.
+func sessionWeakSet(ctx context.Context, sessionID string, aiWeak []string) map[string]bool {
 	set := map[string]bool{}
 	add := func(s string) {
-		s = strings.TrimSpace(strings.ToLower(s))
-		if s != "" {
+		if s = normalizeTag(s); s != "" {
 			set[s] = true
 		}
 	}
@@ -687,7 +823,6 @@ func storeWeakConcepts(ctx context.Context, sessionID, studentID, conceptID stri
 		add(w)
 	}
 
-	// key_concepts of every wrong answer (wrong MCQ/tap, or open answer < 0.6).
 	rows, err := db.Pool.Query(ctx, `
 		SELECT q.key_concepts
 		FROM session_answers sa
@@ -709,17 +844,41 @@ func storeWeakConcepts(ctx context.Context, sessionID, studentID, conceptID stri
 		}
 		rows.Close()
 	}
+	return set
+}
 
-	weak := make([]string, 0, len(set))
-	for k := range set {
-		weak = append(weak, k)
+// updateWeakConceptLifecycle advances each tag's lifecycle after a session.
+// Wrong tags are inserted or re-activated with wrong_count+1 (this is also
+// what flips a cleared tag back to active when a spaced recheck is missed).
+// Tags tested clean get a correct_streak bump and clear at streak 2.
+func updateWeakConceptLifecycle(ctx context.Context, studentID, conceptID string, sessionWeak map[string]bool, tested map[string]tagStat) {
+	wrongTags, progressTags := decideTagLifecycle(sessionWeak, tested)
+
+	for _, tag := range wrongTags {
+		db.Pool.Exec(ctx, `
+			INSERT INTO student_weak_concepts
+			  (student_id, concept_id, tag, wrong_count, correct_streak, status)
+			VALUES ($1, $2, $3, 1, 0, 'active')
+			ON CONFLICT (student_id, concept_id, tag) DO UPDATE
+			SET wrong_count    = student_weak_concepts.wrong_count + 1,
+			    correct_streak = 0,
+			    status         = 'active',
+			    cleared_at     = NULL,
+			    last_seen_at   = now()
+		`, studentID, conceptID, tag)
 	}
-	sort.Strings(weak)
 
-	db.Pool.Exec(ctx, `
-		UPDATE concept_progress SET weak_concepts = $3
-		WHERE student_id = $1 AND concept_id = $2
-	`, studentID, conceptID, weak)
+	if len(progressTags) > 0 {
+		db.Pool.Exec(ctx, `
+			UPDATE student_weak_concepts
+			SET correct_streak = correct_streak + 1,
+			    status     = CASE WHEN correct_streak + 1 >= 2 THEN 'cleared' ELSE status END,
+			    cleared_at = CASE WHEN correct_streak + 1 >= 2 THEN now() ELSE cleared_at END,
+			    last_seen_at = now()
+			WHERE student_id = $1 AND concept_id = $2
+			  AND tag = ANY($3) AND status = 'active'
+		`, studentID, conceptID, progressTags)
+	}
 }
 
 // stationStateCol returns the concept_progress column name for a given station.

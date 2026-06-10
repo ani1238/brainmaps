@@ -176,7 +176,7 @@ type AnswerFeedback struct {
 type CompleteSessionResp struct {
 	SessionID  string           `json:"sessionId"`
 	Score      float64          `json:"score"`     // immediate MCQ-only score; updates after AI grading
-	Passed     bool             `json:"passed"`    // >= 0.80
+	Passed     bool             `json:"passed"`    // score >= 0.80 AND station cleared (tag gate can demote, never promote)
 	NewState   MasteryState     `json:"newState"`
 	AIGrading  bool             `json:"aiGrading"` // true = Gemini still working
 	Feedback   []AnswerFeedback `json:"feedback"`  // available per-answer commentary
@@ -185,11 +185,12 @@ type CompleteSessionResp struct {
 // ConceptWithProgress is returned by the Brain Map endpoint
 type ConceptWithProgress struct {
 	Concept
-	Progress *ConceptProgress `json:"progress,omitempty"`
-	ReviseSchedule *ReviseSchedule `json:"reviseSchedule,omitempty"`
+	Progress       *ConceptProgress `json:"progress,omitempty"`
+	ReviseSchedule *ReviseSchedule  `json:"reviseSchedule,omitempty"`
 }
 
 type TodayResp struct {
-	FixQueue     []ConceptWithProgress `json:"fixQueue"`
-	ReviseQueue  []ConceptWithProgress `json:"reviseQueue"`
+	FixQueue            []ConceptWithProgress `json:"fixQueue"`
+	ReviseQueue         []ConceptWithProgress `json:"reviseQueue"`
+	UpcomingReviseQueue []ConceptWithProgress `json:"upcomingReviseQueue"`
 }

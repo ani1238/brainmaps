@@ -107,12 +107,17 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 		WHERE id = $5
 	`, time.Now(), mcqCorrect, mcqTotal, mcqScore, sessionID)
 
+	passed := mcqScore >= 0.80
 	if hasOpenAnswers {
-		// Async: grade open answers, then recompute EMA
+		// Async: grade open answers, then recompute EMA. The client polls
+		// GetSession for the authoritative score and passed flag.
 		go grade.GradeOpenAnswers(sessionID)
 	} else {
-		// Pure MCQ session: recompute EMA inline (fast, no AI call needed)
-		go grade.RecomputeSession(sessionID)
+		// Pure MCQ session: recompute synchronously (fast, no AI call) so the
+		// response reflects the station outcome — a retry that misses its
+		// targeted weak tags must not show as passed even on a high score.
+		grade.RecomputeSession(sessionID)
+		passed = passed && stationCleared(r.Context(), sessionID)
 	}
 
 	// Fetch updated state for the response (may still be "MCQ-only" until AI finishes)
@@ -129,7 +134,7 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(models.CompleteSessionResp{
 		SessionID: sessionID,
 		Score:     mcqScore,
-		Passed:    mcqScore >= 0.80,
+		Passed:    passed,
 		NewState:  state,
 		AIGrading: hasOpenAnswers,
 		Feedback:  feedback,

@@ -34,6 +34,7 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		     OR cp.l2_state = 'needs_fixing'
 		     OR cp.l3_state = 'needs_fixing'
 		     OR cp.strengthen_state = 'needs_fixing'
+		     OR cp.revise_state = 'needs_fixing'
 		  )
 		ORDER BY cp.ema_score ASC
 		LIMIT 8
@@ -60,7 +61,8 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		       ON cp.concept_id = rs.concept_id AND cp.student_id = rs.student_id
 		WHERE rs.student_id = $1
 		  AND rs.next_due_at <= now()
-		  AND cp.state = 'STRONG'
+		  AND cp.revise_unlocked
+		  AND cp.revise_state <> 'needs_fixing'
 		ORDER BY rs.next_due_at ASC
 		LIMIT 5
 	`, studentID)
@@ -72,10 +74,37 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 
 	reviseQueue := scanProgressRows(revRows, studentID, true)
 
+	upcomingRows, err := db.Pool.Query(r.Context(), `
+		SELECT c.id, c.subject_key, c.chapter_id, c.name, c.order_idx,
+		       cp.ema_score, cp.state,
+		       cp.l1_state, cp.l2_state, cp.l3_state,
+		       cp.strengthen_state, cp.revise_state, cp.revise_unlocked,
+		       cp.total_attempts, cp.last_session_at,
+		       rs.interval_days, rs.next_due_at, rs.last_done_at
+		FROM revise_schedule rs
+		JOIN concepts c ON c.id = rs.concept_id
+		JOIN concept_progress cp
+		       ON cp.concept_id = rs.concept_id AND cp.student_id = rs.student_id
+		WHERE rs.student_id = $1
+		  AND rs.next_due_at > now()
+		  AND cp.revise_unlocked
+		  AND cp.revise_state <> 'needs_fixing'
+		ORDER BY rs.next_due_at ASC
+		LIMIT 50
+	`, studentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer upcomingRows.Close()
+
+	upcomingReviseQueue := scanProgressRowsWithLastDone(upcomingRows, studentID)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(models.TodayResp{
-		FixQueue:    fixQueue,
-		ReviseQueue: reviseQueue,
+		FixQueue:            fixQueue,
+		ReviseQueue:         reviseQueue,
+		UpcomingReviseQueue: upcomingReviseQueue,
 	})
 }
 
@@ -140,6 +169,58 @@ func scanProgressRows(rows interface {
 			ReviseState:     models.StationState(revS),
 			ReviseUnlocked:  revUnlocked,
 			TotalAttempts:   attempts,
+		}
+		result = append(result, cwp)
+	}
+	return result
+}
+
+func scanProgressRowsWithLastDone(rows interface {
+	Next() bool
+	Scan(...any) error
+}, studentID string) []models.ConceptWithProgress {
+	result := []models.ConceptWithProgress{}
+	for rows.Next() {
+		var cwp models.ConceptWithProgress
+		var (
+			ema                       float64
+			state                     models.MasteryState
+			l1s, l2s, l3s, strS, revS string
+			revUnlocked               bool
+			attempts                  int
+			lastAt                    interface{}
+			intervalDays              int
+			nextDue                   time.Time
+			lastDone                  *time.Time
+		)
+		if err := rows.Scan(
+			&cwp.ID, &cwp.SubjectKey, &cwp.ChapterID, &cwp.Name, &cwp.OrderIdx,
+			&ema, &state,
+			&l1s, &l2s, &l3s, &strS, &revS, &revUnlocked,
+			&attempts, &lastAt,
+			&intervalDays, &nextDue, &lastDone,
+		); err != nil {
+			continue
+		}
+		cwp.Progress = &models.ConceptProgress{
+			StudentID:       studentID,
+			ConceptID:       cwp.ID,
+			EMAScore:        ema,
+			State:           state,
+			L1State:         models.StationState(l1s),
+			L2State:         models.StationState(l2s),
+			L3State:         models.StationState(l3s),
+			StrengthenState: models.StationState(strS),
+			ReviseState:     models.StationState(revS),
+			ReviseUnlocked:  revUnlocked,
+			TotalAttempts:   attempts,
+		}
+		cwp.ReviseSchedule = &models.ReviseSchedule{
+			StudentID:    studentID,
+			ConceptID:    cwp.ID,
+			IntervalDays: intervalDays,
+			NextDueAt:    nextDue,
+			LastDoneAt:   lastDone,
 		}
 		result = append(result, cwp)
 	}

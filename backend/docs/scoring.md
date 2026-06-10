@@ -74,6 +74,21 @@ flowchart TD
 **Unlock threshold = 0.60** (forgiving) — not 0.80.
 The student needs 0.80 to be *STRONG*, but only 0.60 to *unlock the next station*. This avoids frustration while still requiring real understanding.
 
+### Tag-gated retries
+
+On a **retry** (station was `needs_fixing`), score alone is not enough: every *targeted* weak tag — a tag that was active for the student before the session AND tested in it — must also be demonstrated at ≥ 50% of its questions (`grade.levelPassGate`). Otherwise the station stays `needs_fixing` even at a high score. First attempts have no targeted tags, so they gate on score only.
+
+The user-facing `passed` flag follows the same rule ("the gate can demote, never promote"): it requires score ≥ 0.80 **and** the station column reading `done`.
+
+## Weak-Tag Lifecycle & Adaptive Retry
+
+Each session's grading pass maintains `student_weak_concepts` (see [database.md](./database.md)):
+
+1. **Detect** — the batch grading call returns `weakConcepts` (constrained to the questions' `key_concepts` vocabulary), unioned with the `key_concepts` of every wrong answer.
+2. **Target** — a retry serves a six-question set focused on the student's worst (up to 2) active tags: one tag → 4 on-tag + 2 general; two tags → 3 + 2 + 1 general. A third active tag waits its turn but stays eligible for general slots.
+3. **Clear** — a tag tested clean in two sessions flips to `cleared`.
+4. **Recheck** — revise sessions silently swap in up to 2 questions for tags cleared in the last 30 days; a miss reactivates the tag and the concept re-enters Today's Fix.
+
 ## Today's Fix Queue Priority
 
 Concepts appear in the Fix queue when:

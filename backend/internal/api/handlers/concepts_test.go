@@ -45,16 +45,17 @@ func TestSelectRetryQuestions(t *testing.T) {
 		want []string
 	}{
 		{
-			name: "matches case insensitively and caps at six diverse questions",
+			// Single focus tag: 4 on-tag slots (type-diverse) + 2 general.
+			name: "matches case insensitively and fills four tag slots plus two general",
 			all:  questions,
 			weak: []string{" Fractions "},
-			want: []string{"q1", "q3", "q5", "q6", "q4", "q7"},
+			want: []string{"q1", "q3", "q5", "q6", "q2", "q4"},
 		},
 		{
 			name: "pads a weakness match with diverse remaining questions",
 			all:  questions[:6],
 			weak: []string{"decimals"},
-			want: []string{"q2", "q3", "q4", "q5", "q6", "q1"},
+			want: []string{"q2", "q1", "q3", "q4", "q5", "q6"},
 		},
 		{
 			name: "uses a compact diverse set when no tags overlap",
@@ -161,6 +162,117 @@ func TestSelectRetryQuestionsAvoidsRecentWithoutMatchingWeakTags(t *testing.T) {
 	want := []string{"new-fix", "new-spot", "old-fix"}
 	if !reflect.DeepEqual(gotIDs, want) {
 		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
+	}
+}
+
+func TestSelectRetryQuestionsTwoTagSlots(t *testing.T) {
+	questions := []models.Question{
+		{ID: "d1", Type: models.ActiveRecall, KeyConcepts: []string{"fractions", "decimals"}},
+		{ID: "a1", Type: models.MCQ, KeyConcepts: []string{"fractions"}},
+		{ID: "a2", Type: models.Descriptive, KeyConcepts: []string{"fractions"}},
+		{ID: "b1", Type: models.MCQ, KeyConcepts: []string{"decimals"}},
+		{ID: "b2", Type: models.Descriptive, KeyConcepts: []string{"decimals"}},
+		{ID: "g1", Type: models.MCQ, KeyConcepts: []string{"geometry"}},
+		{ID: "g2", Type: models.QuestionType("SPOT_IT"), KeyConcepts: []string{"geometry"}},
+	}
+
+	// Two focus tags: 3 top-tag + 2 second-tag + 1 general. The dual-tagged
+	// question is consumed by the top tag only.
+	got := selectRetryQuestions(questions, []string{"fractions", "decimals"}, nil)
+	gotIDs := make([]string, len(got))
+	for i, q := range got {
+		gotIDs[i] = q.ID
+	}
+	want := []string{"d1", "a1", "a2", "b1", "b2", "g1"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
+	}
+}
+
+func TestSelectRetryQuestionsCapsAtTwoTags(t *testing.T) {
+	questions := []models.Question{
+		{ID: "x1", Type: models.MCQ, KeyConcepts: []string{"tag one"}},
+		{ID: "x2", Type: models.Descriptive, KeyConcepts: []string{"tag one"}},
+		{ID: "x3", Type: models.Blurt, KeyConcepts: []string{"tag one"}},
+		{ID: "y1", Type: models.MCQ, KeyConcepts: []string{"tag two"}},
+		{ID: "y2", Type: models.Descriptive, KeyConcepts: []string{"tag two"}},
+		{ID: "z1", Type: models.MCQ, KeyConcepts: []string{"tag three"}},
+		{ID: "z2", Type: models.QuestionType("SPOT_IT"), KeyConcepts: []string{"tag three"}},
+	}
+
+	// Tag three gets no dedicated slots, but its questions remain eligible
+	// for the single general slot.
+	got := selectRetryQuestions(questions, []string{"tag one", "tag two", "tag three"}, nil)
+	gotIDs := make([]string, len(got))
+	for i, q := range got {
+		gotIDs[i] = q.ID
+	}
+	want := []string{"x1", "x2", "x3", "y1", "y2", "z1"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
+	}
+}
+
+func TestSelectRetryQuestionsSkipsUncoveredTag(t *testing.T) {
+	questions := []models.Question{
+		{ID: "y1", Type: models.MCQ, KeyConcepts: []string{"tag two"}},
+		{ID: "y2", Type: models.Descriptive, KeyConcepts: []string{"tag two"}},
+		{ID: "z1", Type: models.MCQ, KeyConcepts: []string{"tag three"}},
+		{ID: "w1", Type: models.Feynman, KeyConcepts: []string{"general"}},
+	}
+
+	// "ghost tag" has no bank coverage, so tags two and three are promoted
+	// into the two focus slots.
+	got := selectRetryQuestions(questions, []string{"ghost tag", "tag two", "tag three"}, nil)
+	gotIDs := make([]string, len(got))
+	for i, q := range got {
+		gotIDs[i] = q.ID
+	}
+	want := []string{"y1", "y2", "z1", "w1"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
+	}
+}
+
+func TestInjectRecheckQuestions(t *testing.T) {
+	selected := []models.Question{
+		{ID: "s1", Type: models.MCQ},
+		{ID: "s2", Type: models.Descriptive, KeyConcepts: []string{"decimals"}},
+		{ID: "s3", Type: models.Feynman},
+		{ID: "s4", Type: models.Blurt},
+		{ID: "s5", Type: models.ActiveRecall},
+		{ID: "s6", Type: models.MCQ},
+	}
+	candidates := []models.Question{
+		{ID: "s2", Type: models.Descriptive, KeyConcepts: []string{"decimals"}}, // already in the set
+		{ID: "c3", Type: models.MCQ, KeyConcepts: []string{"fractions"}},        // recent — only as last resort
+		{ID: "c1", Type: models.Descriptive, KeyConcepts: []string{"fractions"}},
+		{ID: "c2", Type: models.MCQ, KeyConcepts: []string{"decimals"}},
+	}
+	recent := map[string]bool{"c3": true}
+
+	got := injectRecheckQuestions(selected, candidates, []string{"fractions", "decimals"}, recent)
+	gotIDs := make([]string, len(got))
+	for i, q := range got {
+		gotIDs[i] = q.ID
+	}
+	// Trailing slots are replaced: fractions prefers the unseen c1 over the
+	// recent c3; decimals skips the already-present s2 and takes c2.
+	want := []string{"s1", "s2", "s3", "s4", "c2", "c1"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
+	}
+}
+
+func TestInjectRecheckQuestionsNoOp(t *testing.T) {
+	selected := []models.Question{{ID: "s1"}, {ID: "s2"}}
+	candidates := []models.Question{{ID: "c1", KeyConcepts: []string{"fractions"}}}
+
+	if got := injectRecheckQuestions(selected, candidates, nil, nil); len(got) != 2 || got[0].ID != "s1" {
+		t.Fatalf("expected no-op on empty cleared tags, got %v", got)
+	}
+	if got := injectRecheckQuestions(selected, nil, []string{"fractions"}, nil); len(got) != 2 || got[1].ID != "s2" {
+		t.Fatalf("expected no-op on empty candidates, got %v", got)
 	}
 }
 

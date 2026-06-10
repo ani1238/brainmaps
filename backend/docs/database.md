@@ -132,6 +132,21 @@ Composite PK `(student_id, concept_id)`. One row per student×concept pair.
 | `state` | Derived from `ema_score`: VERY_WEAK / WEAK / DEVELOPING / STRONG |
 | `l1_done … strengthen_done` | Set to `true` when that station's session scores ≥ 0.60 |
 
+### `student_weak_concepts`
+Composite PK `(student_id, concept_id, tag)`. One row per weakness the student has shown, keyed by a normalized (`lower(trim())`) tag drawn from `questions.key_concepts`. Written by the grading lifecycle, read by adaptive retry selection. Added in migration 006.
+
+| Column | Notes |
+|---|---|
+| `status` | `active` (drives retry targeting) or `cleared` (eligible for spaced recheck) |
+| `wrong_count` | Times the tag appeared in a session's weakness output — ranks retry focus |
+| `correct_streak` | Consecutive sessions where the tag was tested clean; clears at 2 |
+| `cleared_at` | Set on clear; revise sessions re-test tags cleared in the last 30 days |
+
+Lifecycle rules (see `grade.updateWeakConceptLifecycle`):
+- Tag in a session's weakness output → `wrong_count + 1`, `status = 'active'`, streak reset (this also reactivates a `cleared` tag whose recheck was missed)
+- Tag tested clean (≥ 50% of its questions correct, not flagged weak) → `correct_streak + 1`; cleared at streak 2
+- Tag not tested in a session → untouched
+
 ### `session_answers`
 One row per question per session. MCQ answers are graded instantly; open-ended answers get `ai_score` set async.
 

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/models"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // derefStr dereferences a nullable string pointer, returning fallback if nil.
@@ -36,7 +38,7 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 		       cp.l1_state, cp.l2_state, cp.l3_state,
 		       cp.strengthen_state, cp.revise_state, cp.revise_unlocked,
 		       cp.total_attempts, cp.last_session_at,
-		       rs.interval_days, rs.next_due_at
+		       rs.interval_days, rs.next_due_at, rs.last_done_at
 		FROM concepts c
 		LEFT JOIN concept_progress cp
 		       ON cp.concept_id = c.id AND cp.student_id = $2
@@ -63,13 +65,14 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 			lastAt                    interface{}
 			intervalDays              *int
 			nextDue                   *time.Time
+			lastDone                  *time.Time
 		)
 		if err := rows.Scan(
 			&cwp.ID, &cwp.SubjectKey, &cwp.ChapterID, &cwp.Name, &cwp.OrderIdx,
 			&emaScore, &state,
 			&l1s, &l2s, &l3s, &strS, &revS, &revUnlocked,
 			&attempts, &lastAt,
-			&intervalDays, &nextDue,
+			&intervalDays, &nextDue, &lastDone,
 		); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -100,6 +103,7 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 				ConceptID:    cwp.ID,
 				IntervalDays: *intervalDays,
 				NextDueAt:    *nextDue,
+				LastDoneAt:   lastDone,
 			}
 		}
 
@@ -112,14 +116,15 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 
 // ConceptDetailResp is the single-concept payload used by the question screens.
 type ConceptDetailResp struct {
-	ID            string                  `json:"id"`
-	SubjectKey    string                  `json:"subjectKey"`
-	ChapterID     string                  `json:"chapterId"`
-	ChapterName   string                  `json:"chapterName"`
-	ChapterNumber int                     `json:"chapterNumber"`
-	Name          string                  `json:"name"`
-	Recap         string                  `json:"recap"`
-	Progress      *models.ConceptProgress `json:"progress,omitempty"`
+	ID             string                  `json:"id"`
+	SubjectKey     string                  `json:"subjectKey"`
+	ChapterID      string                  `json:"chapterId"`
+	ChapterName    string                  `json:"chapterName"`
+	ChapterNumber  int                     `json:"chapterNumber"`
+	Name           string                  `json:"name"`
+	Recap          string                  `json:"recap"`
+	Progress       *models.ConceptProgress `json:"progress,omitempty"`
+	ReviseSchedule *models.ReviseSchedule  `json:"reviseSchedule,omitempty"`
 }
 
 // GET /concepts/{id}?student=<uuid>
@@ -137,6 +142,9 @@ func GetConcept(w http.ResponseWriter, r *http.Request) {
 		l1s, l2s, l3s, strS, revS *string
 		revUnlocked               *bool
 		attempts                  *int
+		intervalDays              *int
+		nextDue                   *time.Time
+		lastDone                  *time.Time
 	)
 
 	err := db.Pool.QueryRow(r.Context(), `
@@ -146,11 +154,14 @@ func GetConcept(w http.ResponseWriter, r *http.Request) {
 		       cp.ema_score, cp.state,
 		       cp.l1_state, cp.l2_state, cp.l3_state,
 		       cp.strengthen_state, cp.revise_state, cp.revise_unlocked,
-		       cp.total_attempts
+		       cp.total_attempts,
+		       rs.interval_days, rs.next_due_at, rs.last_done_at
 		FROM concepts c
 		JOIN chapters ch ON ch.id = c.chapter_id
 		LEFT JOIN concept_progress cp
 		       ON cp.concept_id = c.id AND cp.student_id = $2
+		LEFT JOIN revise_schedule rs
+		       ON rs.concept_id = c.id AND rs.student_id = $2
 		WHERE c.id = $1
 	`, conceptID, studentID).Scan(
 		&resp.ID, &resp.SubjectKey, &resp.ChapterID, &resp.Name,
@@ -159,6 +170,7 @@ func GetConcept(w http.ResponseWriter, r *http.Request) {
 		&emaScore, &state,
 		&l1s, &l2s, &l3s, &strS, &revS, &revUnlocked,
 		&attempts,
+		&intervalDays, &nextDue, &lastDone,
 	)
 	if err != nil {
 		http.Error(w, "concept not found", http.StatusNotFound)
@@ -190,6 +202,15 @@ func GetConcept(w http.ResponseWriter, r *http.Request) {
 			TotalAttempts:   at,
 		}
 	}
+	if intervalDays != nil && nextDue != nil {
+		resp.ReviseSchedule = &models.ReviseSchedule{
+			StudentID:    studentID,
+			ConceptID:    resp.ID,
+			IntervalDays: *intervalDays,
+			NextDueAt:    *nextDue,
+			LastDoneAt:   lastDone,
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -218,6 +239,55 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	questions, err := scanQuestionRows(rows, conceptID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Every attempt is compact and varied. Retries additionally focus on the
+	// student's worst active weak tags; revise sessions silently re-test
+	// recently cleared ones (spaced recheck).
+	selected := selectDiverseQuestions(questions, nil, 6)
+	if student := r.URL.Query().Get("student"); student != "" {
+		if col := levelStateCol(level); col != "" {
+			var state string
+			err := db.Pool.QueryRow(r.Context(), fmt.Sprintf(
+				`SELECT %s FROM concept_progress WHERE student_id = $1 AND concept_id = $2`, col,
+			), student, conceptID).Scan(&state)
+			if err == nil && state == "needs_fixing" {
+				rankedTags := activeTagsRanked(r.Context(), student, conceptID)
+				recent := latestAttemptQuestionIDs(r, student, conceptID, level)
+				if recent == nil {
+					recent = make(map[string]bool)
+				}
+				previousOrder := r.URL.Query()["exclude"]
+				for _, questionID := range previousOrder {
+					if questionID != "" {
+						recent[questionID] = true
+					}
+				}
+				selected = selectRetryQuestions(questions, rankedTags, recent)
+				selected = ensureDifferentAttempt(selected, questions, previousOrder)
+			}
+		}
+
+		if level == "revise" {
+			if clearedTags := recentlyClearedTags(r.Context(), student, conceptID); len(clearedTags) > 0 {
+				candidates := recheckCandidates(r.Context(), conceptID, clearedTags)
+				recent := latestAttemptQuestionIDs(r, student, conceptID, level)
+				selected = injectRecheckQuestions(selected, candidates, clearedTags, recent)
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(selected)
+}
+
+// scanQuestionRows assembles Question models (with their MCQ options) from a
+// questions ⋈ mcq_options result set ordered by question id, option key.
+func scanQuestionRows(rows pgx.Rows, conceptID string) ([]models.Question, error) {
 	qMap := make(map[string]*models.Question)
 	var order []string
 
@@ -233,8 +303,7 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 			&qID, &qType, &qLevel, &qText, &explanation, &rubricHint, &keyConcepts,
 			&optKey, &optText, &isCorrect,
 		); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			return nil, err
 		}
 
 		if _, exists := qMap[qID]; !exists {
@@ -264,36 +333,81 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 	for _, id := range order {
 		questions = append(questions, *qMap[id])
 	}
+	return questions, nil
+}
 
-	// Every attempt is compact and varied. Retries additionally prioritize
-	// questions whose key concepts overlap the student's recorded weaknesses.
-	selected := selectDiverseQuestions(questions, nil, 6)
-	if student := r.URL.Query().Get("student"); student != "" {
-		if col := levelStateCol(level); col != "" {
-			var state string
-			var weak []string
-			err := db.Pool.QueryRow(r.Context(), fmt.Sprintf(
-				`SELECT %s, weak_concepts FROM concept_progress WHERE student_id = $1 AND concept_id = $2`, col,
-			), student, conceptID).Scan(&state, &weak)
-			if err == nil && state == "needs_fixing" {
-				recent := latestAttemptQuestionIDs(r, student, conceptID, level)
-				if recent == nil {
-					recent = make(map[string]bool)
-				}
-				previousOrder := r.URL.Query()["exclude"]
-				for _, questionID := range previousOrder {
-					if questionID != "" {
-						recent[questionID] = true
-					}
-				}
-				selected = selectRetryQuestions(questions, weak, recent)
-				selected = ensureDifferentAttempt(selected, questions, previousOrder)
-			}
+// activeTagsRanked returns the student's active weak tags worst-first.
+// Keep the ordering in sync with activeWeakTags in the grade package, which
+// uses the same ranking for the tag-gated pass decision.
+func activeTagsRanked(ctx context.Context, studentID, conceptID string) []string {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT tag FROM student_weak_concepts
+		WHERE student_id = $1 AND concept_id = $2 AND status = 'active'
+		ORDER BY wrong_count DESC, last_seen_at DESC
+	`, studentID, conceptID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var tags []string
+	for rows.Next() {
+		var t string
+		if rows.Scan(&t) == nil {
+			tags = append(tags, t)
 		}
 	}
+	return tags
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(selected)
+// recentlyClearedTags returns up to two weak tags the student cleared in the
+// last 30 days — revise sessions silently re-test them (spaced recheck).
+func recentlyClearedTags(ctx context.Context, studentID, conceptID string) []string {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT tag FROM student_weak_concepts
+		WHERE student_id = $1 AND concept_id = $2 AND status = 'cleared'
+		  AND cleared_at > now() - interval '30 days'
+		ORDER BY cleared_at DESC
+		LIMIT 2
+	`, studentID, conceptID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var tags []string
+	for rows.Next() {
+		var t string
+		if rows.Scan(&t) == nil {
+			tags = append(tags, t)
+		}
+	}
+	return tags
+}
+
+// recheckCandidates loads questions across ALL levels of the concept whose
+// key_concepts match any cleared tag — cleared weaknesses usually live on
+// lower-level questions than the revise set itself.
+func recheckCandidates(ctx context.Context, conceptID string, tags []string) []models.Question {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT q.id, q.type, q.level, q.text, q.explanation, q.rubric_hint, q.key_concepts,
+		       o.option_key, o.text AS option_text, o.is_correct
+		FROM questions q
+		LEFT JOIN mcq_options o ON o.question_id = q.id
+		WHERE q.concept_id = $1
+		  AND EXISTS (SELECT 1 FROM unnest(q.key_concepts) kc WHERE lower(trim(kc)) = ANY($2))
+		ORDER BY q.id, o.option_key
+	`, conceptID, tags)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	questions, err := scanQuestionRows(rows, conceptID)
+	if err != nil {
+		return nil
+	}
+	return questions
 }
 
 func latestAttemptQuestionIDs(r *http.Request, studentID, conceptID, level string) map[string]bool {
@@ -344,53 +458,161 @@ func levelStateCol(level string) string {
 	}
 }
 
-// selectRetryQuestions builds a six-question adaptive retry set. Questions
-// matching the student's weak concepts are selected first with as much type
-// variety as possible, then non-matching questions pad any remaining slots.
-//
-// FUTURE: when fewer than `target` existing questions cover the weak concepts,
-// this is where we'll generate fresh AI questions targeting `weak` instead of
-// padding with unrelated ones — the rest of the pipeline already keys off
-// key_concepts, so generated questions just need to be tagged the same way.
-func selectRetryQuestions(all []models.Question, weak []string, recent map[string]bool) []models.Question {
-	const target = 6
-
-	weakSet := map[string]bool{}
-	for _, w := range weak {
-		if normalized := strings.ToLower(strings.TrimSpace(w)); normalized != "" {
-			weakSet[normalized] = true
+// questionMatchesTag reports whether any of the question's key_concepts equals
+// the (already normalized) tag.
+func questionMatchesTag(q models.Question, tag string) bool {
+	for _, kc := range q.KeyConcepts {
+		if strings.ToLower(strings.TrimSpace(kc)) == tag {
+			return true
 		}
 	}
+	return false
+}
 
-	var unseenMatched, unseenRest, recentMatched, recentRest []models.Question
-	for _, q := range all {
-		hit := false
-		for _, kc := range q.KeyConcepts {
-			normalized := strings.ToLower(strings.TrimSpace(kc))
-			if normalized != "" && weakSet[normalized] {
-				hit = true
+// selectRetryQuestions builds a six-question adaptive retry set with per-tag
+// slots. rankedTags is ordered worst-first (wrong_count DESC, last_seen_at
+// DESC). The first (up to two) ranked tags with bank coverage become the
+// focus: one focus tag gets 4 on-tag slots + 2 general; two get 3 + 2 + 1
+// general. Tags without matching questions are skipped, promoting the next
+// rank; a third active tag gets no dedicated slots until an earlier one
+// clears, but its questions stay eligible for the general slots. With no
+// focus tags at all, the set falls back to the plain diverse selection.
+//
+// FUTURE: when fewer than `quota` existing questions cover a focus tag, this
+// is where we'll generate fresh AI questions targeting it instead of padding
+// with unrelated ones — the rest of the pipeline already keys off
+// key_concepts, so generated questions just need to be tagged the same way.
+func selectRetryQuestions(all []models.Question, rankedTags []string, recent map[string]bool) []models.Question {
+	const target = 6
+
+	var focus []string
+	for _, t := range rankedTags {
+		tag := strings.ToLower(strings.TrimSpace(t))
+		if tag == "" {
+			continue
+		}
+		for _, q := range all {
+			if questionMatchesTag(q, tag) {
+				focus = append(focus, tag)
 				break
 			}
 		}
-		switch {
-		case hit && !recent[q.ID]:
-			unseenMatched = append(unseenMatched, q)
-		case !hit && !recent[q.ID]:
-			unseenRest = append(unseenRest, q)
-		case hit:
-			recentMatched = append(recentMatched, q)
-		default:
-			recentRest = append(recentRest, q)
+		if len(focus) == 2 {
+			break
 		}
 	}
 
-	if len(unseenMatched)+len(recentMatched) == 0 {
+	if len(focus) == 0 {
+		var unseenRest, recentRest []models.Question
+		for _, q := range all {
+			if recent[q.ID] {
+				recentRest = append(recentRest, q)
+			} else {
+				unseenRest = append(unseenRest, q)
+			}
+		}
 		unseen := selectDiverseQuestionPools(target, unseenRest)
 		return appendRecentQuestions(unseen, target, recentRest)
 	}
 
-	unseen := selectDiverseQuestionPools(target, unseenMatched, unseenRest)
-	return appendRecentQuestions(unseen, target, recentMatched, recentRest)
+	quotas := []int{4}
+	if len(focus) == 2 {
+		quotas = []int{3, 2}
+	}
+
+	picked := make(map[string]bool)
+	out := make([]models.Question, 0, target)
+
+	// take fills up to quota slots from questions satisfying match, unseen
+	// first, preserving type variety within the group.
+	take := func(quota int, match func(models.Question) bool) {
+		if quota <= 0 {
+			return
+		}
+		var unseenPool, recentPool []models.Question
+		for _, q := range all {
+			if picked[q.ID] || !match(q) {
+				continue
+			}
+			if recent[q.ID] {
+				recentPool = append(recentPool, q)
+			} else {
+				unseenPool = append(unseenPool, q)
+			}
+		}
+		got := appendRecentQuestions(selectDiverseQuestionPools(quota, unseenPool), quota, recentPool)
+		for _, q := range got {
+			picked[q.ID] = true
+			out = append(out, q)
+		}
+	}
+
+	// Per-tag slots. A question matching both focus tags is consumed by the
+	// first tag only (the picked guard).
+	for i, tag := range focus {
+		tag := tag
+		take(quotas[i], func(q models.Question) bool { return questionMatchesTag(q, tag) })
+	}
+
+	// General slots: confirm the rest of the level with off-focus questions.
+	take(target-len(out), func(q models.Question) bool {
+		for _, tag := range focus {
+			if questionMatchesTag(q, tag) {
+				return false
+			}
+		}
+		return true
+	})
+
+	// Small banks: pad with whatever remains to keep the retry meaningful.
+	take(target-len(out), func(models.Question) bool { return true })
+
+	return out
+}
+
+// injectRecheckQuestions swaps trailing questions in selected for one
+// candidate per cleared tag — the spaced recheck. Questions already in the
+// set are skipped and unseen candidates are preferred. A missed recheck flips
+// its tag back to active via the grading lifecycle; no handling needed here.
+func injectRecheckQuestions(selected, candidates []models.Question, clearedTags []string, recent map[string]bool) []models.Question {
+	if len(selected) == 0 || len(candidates) == 0 || len(clearedTags) == 0 {
+		return selected
+	}
+
+	present := make(map[string]bool, len(selected))
+	for _, q := range selected {
+		present[q.ID] = true
+	}
+
+	out := append([]models.Question(nil), selected...)
+	slot := len(out) - 1
+	for _, t := range clearedTags {
+		if slot < 0 {
+			break
+		}
+		tag := strings.ToLower(strings.TrimSpace(t))
+		idx := -1
+		for i, q := range candidates {
+			if present[q.ID] || !questionMatchesTag(q, tag) {
+				continue
+			}
+			if !recent[q.ID] {
+				idx = i
+				break
+			}
+			if idx == -1 {
+				idx = i
+			}
+		}
+		if idx == -1 {
+			continue
+		}
+		delete(present, out[slot].ID)
+		present[candidates[idx].ID] = true
+		out[slot] = candidates[idx]
+		slot--
+	}
+	return out
 }
 
 // ensureDifferentAttempt prevents an identical retry. Repeats are allowed when
