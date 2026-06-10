@@ -199,13 +199,14 @@ export async function fetchConcepts(chapterId: string): Promise<Concept[]> {
 
 export async function fetchQuestions(
   conceptId: string,
-  level: QuestionLevel
+  level: QuestionLevel,
+  excludeQuestionIds: string[] = []
 ): Promise<Question[]> {
   // Pass the student so the backend can serve an adaptive set on a retry
   // (a level the student previously failed) — targeting their weak concepts.
-  const res = await fetch(
-    `${API_BASE}/concepts/${conceptId}/questions?level=${level}&student=${STUDENT_ID}`
-  );
+  const params = new URLSearchParams({ level, student: STUDENT_ID });
+  excludeQuestionIds.forEach(id => params.append('exclude', id));
+  const res = await fetch(`${API_BASE}/concepts/${conceptId}/questions?${params}`);
   if (!res.ok) throw new Error(`fetchQuestions ${res.status}: ${await res.text()}`);
   const data: ApiQuestion[] = await res.json();
   return data.map(mapQuestion);

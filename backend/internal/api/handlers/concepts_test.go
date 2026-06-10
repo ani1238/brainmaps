@@ -139,7 +139,7 @@ func TestSelectRetryQuestionsReusesRecentOnlyWhenNeeded(t *testing.T) {
 	for i, q := range got {
 		gotIDs[i] = q.ID
 	}
-	want := []string{"new-fix", "new-mcq", "old-spot", "old-fix"}
+	want := []string{"new-fix", "new-mcq", "old-fix", "old-spot"}
 	if !reflect.DeepEqual(gotIDs, want) {
 		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
 	}

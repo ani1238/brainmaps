@@ -273,7 +273,10 @@ function SharpenContent() {
     }
   }
 
-  function handleRetry() {
+  async function handleRetry() {
+    const previousQuestions = questions;
+    const excludeQuestionIds = previousQuestions.map(q => q.id);
+
     setCurrentIdx(0);
     setFinished(false);
     setCorrectCount(0);
@@ -281,11 +284,24 @@ function SharpenContent() {
     collectedAnswers.current = [];
     setApiResult(null);
     if (pollRef.current) clearInterval(pollRef.current);
-    // Start a fresh session (only if questions are backed by the DB)
+
+    // Fetch a fresh adaptive set and explicitly exclude every question the
+    // student just saw. The backend only reuses one when alternatives run out.
     if (questionsFromApi && level && conceptId) {
-      startSession(conceptId, level)
-        .then(id => { sessionIdRef.current = id; })
-        .catch(() => {});
+      setLoadingQuestions(true);
+      setQuestions([]);
+      try {
+        const nextQuestions = await fetchQuestions(conceptId, level, excludeQuestionIds);
+        setQuestions(nextQuestions.length > 0 ? nextQuestions : previousQuestions);
+        sessionIdRef.current = await startSession(conceptId, level);
+      } catch {
+        setQuestions(previousQuestions);
+        startSession(conceptId, level)
+          .then(id => { sessionIdRef.current = id; })
+          .catch(() => {});
+      } finally {
+        setLoadingQuestions(false);
+      }
     }
   }
 

@@ -268,6 +268,14 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 			), student, conceptID).Scan(&state, &weak)
 			if err == nil && state == "needs_fixing" {
 				recent := latestAttemptQuestionIDs(r, student, conceptID, level)
+				if recent == nil {
+					recent = make(map[string]bool)
+				}
+				for _, questionID := range r.URL.Query()["exclude"] {
+					if questionID != "" {
+						recent[questionID] = true
+					}
+				}
 				selected = selectRetryQuestions(questions, weak, recent)
 			}
 		}
@@ -366,10 +374,20 @@ func selectRetryQuestions(all []models.Question, weak []string, recent map[strin
 	}
 
 	if len(unseenMatched)+len(recentMatched) == 0 {
-		return selectDiverseQuestionPools(target, unseenRest, recentRest)
+		unseen := selectDiverseQuestionPools(target, unseenRest)
+		return appendRecentQuestions(unseen, target, recentRest)
 	}
 
-	return selectDiverseQuestionPools(target, unseenMatched, unseenRest, recentMatched, recentRest)
+	unseen := selectDiverseQuestionPools(target, unseenMatched, unseenRest)
+	return appendRecentQuestions(unseen, target, recentMatched, recentRest)
+}
+
+func appendRecentQuestions(selected []models.Question, target int, recent ...[]models.Question) []models.Question {
+	if len(selected) >= target {
+		return selected
+	}
+	padding := selectDiverseQuestionPools(target-len(selected), recent...)
+	return append(selected, padding...)
 }
 
 // selectDiverseQuestions selects from primary before fallback, taking one
