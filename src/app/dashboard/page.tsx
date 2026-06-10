@@ -7,8 +7,7 @@ import { GridBackground } from '@/components/GridBackground';
 import { LeftRail } from '@/components/LeftRail';
 import { COLORS, SUBJECT_MAP } from '@/lib/tokens';
 import { fetchDashboard, fetchToday, type ApiDashboard, type ApiToday } from '@/lib/api';
-
-const STUDENT_NAME = 'Aarav';
+import { getProfile } from '@/lib/storage';
 
 function todayLabel() {
   return new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -24,9 +23,11 @@ export default function DashboardPage() {
   const [today, setToday] = useState<ApiToday | null>(null);
   const [loading, setLoading] = useState(true);
   const [dateLabel, setDateLabel] = useState(''); // client-only → avoids SSR hydration mismatch
+  const [studentName, setStudentName] = useState('Student');
 
   useEffect(() => {
     setDateLabel(todayLabel());
+    setStudentName(getProfile()?.name ?? 'Student');
     Promise.all([fetchDashboard(), fetchToday()])
       .then(([d, t]) => { setDash(d); setToday(t); })
       .catch(() => {})
@@ -67,7 +68,7 @@ export default function DashboardPage() {
             <div>
               <div className="text-xs font-bold mb-0.5" style={{ color: '#78716c' }}>{dateLabel}</div>
               <div className="flex items-baseline gap-3 flex-wrap">
-                <h1 className="text-3xl font-extrabold leading-none" style={{ color: '#1c1917' }}>Hi {STUDENT_NAME}! 👋</h1>
+                <h1 className="text-3xl font-extrabold leading-none" style={{ color: '#1c1917' }}>Hi {studentName}! 👋</h1>
                 <span className="text-sm" style={{ color: '#78716c' }}>About {estMin} minutes today</span>
               </div>
             </div>
