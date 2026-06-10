@@ -17,7 +17,8 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fix queue: concepts with a needs_fixing station, no session in the last 23 hours
+	// Fix queue: every concept with a station that still needs fixing. A failed
+	// level should appear immediately and remain here until the student passes it.
 	fixRows, err := db.Pool.Query(r.Context(), `
 		SELECT c.id, c.subject_key, c.chapter_id, c.name, c.order_idx,
 		       cp.ema_score, cp.state,
@@ -33,7 +34,6 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		     OR cp.l3_state = 'needs_fixing'
 		     OR cp.strengthen_state = 'needs_fixing'
 		  )
-		  AND (cp.last_session_at IS NULL OR cp.last_session_at < now() - INTERVAL '23 hours')
 		ORDER BY cp.ema_score ASC
 		LIMIT 8
 	`, studentID)
