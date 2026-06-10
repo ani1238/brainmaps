@@ -8,6 +8,7 @@ import { LeftRail } from '@/components/LeftRail';
 import { COLORS, SUBJECT_MAP } from '@/lib/tokens';
 import { fetchDashboard, fetchToday, type ApiDashboard, type ApiToday } from '@/lib/api';
 import { getProfile } from '@/lib/storage';
+import { assessmentHref } from '@/lib/navigation';
 
 function todayLabel() {
   return new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -151,7 +152,10 @@ export default function DashboardPage() {
               </div>
               {fixFirst && (
                 <button
-                  onClick={() => router.push(`/sharpen?conceptId=${fixFirst.id}&level=level1`)}
+                  onClick={() => router.push(assessmentHref('/sharpen', {
+                    conceptId: fixFirst.id,
+                    level: 'level1',
+                  }, '/dashboard'))}
                   className="flex-shrink-0 px-4 py-2.5 rounded-xl font-bold text-sm text-white transition-all hover:opacity-90 active:scale-[0.98]"
                   style={{ background: COLORS.weak, boxShadow: '0 4px 16px rgba(249,115,22,0.3)' }}
                 >
@@ -182,7 +186,10 @@ export default function DashboardPage() {
               </div>
               {reviseCount > 0 && (
                 <button
-                  onClick={() => router.push(`/recall?conceptId=${today!.reviseQueue[0].id}&level=revise`)}
+                  onClick={() => router.push(assessmentHref('/recall', {
+                    conceptId: today!.reviseQueue[0].id,
+                    level: 'revise',
+                  }, '/dashboard'))}
                   className="flex-shrink-0 px-4 py-2.5 rounded-xl font-bold text-sm transition-all hover:opacity-90"
                   style={{ background: 'rgba(255,255,255,0.7)', border: `1.5px solid ${COLORS.strong}`, color: '#16a34a' }}
                 >

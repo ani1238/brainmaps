@@ -9,6 +9,7 @@ import { COLORS, subjectDisplay } from '@/lib/tokens';
 import { RECALL_QUESTIONS, RECALL_CONCEPT_INFO as QUEUE_INFO, CONCEPT_BY_ID, CONCEPT_RECALL_IDX, CHAPTER_DATA } from '@/data/dummy';
 import { fetchConcept, fetchQuestions, type ApiConceptDetail } from '@/lib/api';
 import type { Question } from '@/types';
+import { assessmentReturn } from '@/lib/navigation';
 
 // Generic active recall question for concepts that don't have a specific one
 function makeGenericRecall(conceptName: string): Question {
@@ -23,17 +24,27 @@ function RecallContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const conceptId = searchParams.get('conceptId');
+  const returnTarget = assessmentReturn(
+    searchParams.get('returnTo'),
+    conceptId ? `/brain-map?conceptId=${conceptId}` : '/dashboard',
+  );
 
   // ── Single-concept mode (from sharpen completion) ──────────────────────────
   if (conceptId) {
-    return <SingleConceptRecall conceptId={conceptId} />;
+    return <SingleConceptRecall conceptId={conceptId} returnTarget={returnTarget} />;
   }
 
   // ── Full queue mode (from dashboard / brain map bottom CTA) ───────────────
   return <QueueRecall />;
 }
 
-function SingleConceptRecall({ conceptId }: { conceptId: string }) {
+function SingleConceptRecall({
+  conceptId,
+  returnTarget,
+}: {
+  conceptId: string;
+  returnTarget: { href: string; label: string };
+}) {
   const router = useRouter();
   const [finished, setFinished] = useState(false);
 
@@ -90,11 +101,11 @@ function SingleConceptRecall({ conceptId }: { conceptId: string }) {
               Great work! You won't see this one again for 3 weeks ✨
             </p>
             <button
-              onClick={() => router.push('/brain-map')}
+              onClick={() => router.push(returnTarget.href)}
               className="px-6 py-3 rounded-xl font-bold text-sm text-white"
               style={{ background: COLORS.strong }}
             >
-              ← Back to Brain Map
+              ← Back to {returnTarget.label}
             </button>
           </div>
         </main>

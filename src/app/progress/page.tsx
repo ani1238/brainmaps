@@ -6,6 +6,7 @@ import { GridBackground } from '@/components/GridBackground';
 import { LeftRail } from '@/components/LeftRail';
 import { COLORS, SUBJECT_MAP } from '@/lib/tokens';
 import { fetchDashboard, type ApiDashboard } from '@/lib/api';
+import { assessmentHref } from '@/lib/navigation';
 
 function heatColor(n: number) {
   if (n === 0) return '#ece5d3';
@@ -131,7 +132,11 @@ export default function ProgressPage() {
             ) : (
               <div className="flex flex-col gap-2">
                 {dash!.needsAttention.map(c => (
-                  <Link key={c.conceptId} href={`/sharpen?conceptId=${c.conceptId}&level=level1`} className="flex flex-col hover:opacity-80">
+                  <Link
+                    key={c.conceptId}
+                    href={assessmentHref('/sharpen', { conceptId: c.conceptId, level: 'level1' }, '/progress')}
+                    className="flex flex-col hover:opacity-80"
+                  >
                     <span className="text-sm font-semibold truncate" style={{ color: '#1c1917' }}>{c.name}</span>
                     <span className="text-[11px]" style={{ color: '#a8a29e' }}>{c.note}</span>
                   </Link>

@@ -8,6 +8,7 @@ import { COLORS, STATION_ORDER, STATION_LABELS, STATION_NUMBERS } from '@/lib/to
 import { CONCEPT_QUESTIONS } from '@/data/questions';
 import { splitStations } from '@/data/society';
 import { fetchQuestions } from '@/lib/api';
+import { assessmentHref } from '@/lib/navigation';
 
 // Maps each station to the question-level it serves
 const STATION_TO_LEVEL: Record<StationKey, QuestionLevel> = {
@@ -174,10 +175,11 @@ export function RightPanel({
 
   function startStation(key: StationKey) {
     const level = STATION_TO_LEVEL[key];
+    const returnTo = `/brain-map?conceptId=${concept.id}`;
     if (key === 'keep_it_fresh') {
-      router.push(`/recall?conceptId=${concept.id}&level=${level}`);
+      router.push(assessmentHref('/recall', { conceptId: concept.id, level }, returnTo));
     } else {
-      router.push(`/sharpen?conceptId=${concept.id}&level=${level}`);
+      router.push(assessmentHref('/sharpen', { conceptId: concept.id, level }, returnTo));
     }
   }
 

@@ -17,6 +17,7 @@ import {
   type SubmitAnswer, type SessionResult, type AnswerFeedback, type ApiConceptDetail, type ApiTodayItem,
 } from '@/lib/api';
 import type { Question } from '@/types';
+import { assessmentHref, assessmentReturn } from '@/lib/navigation';
 
 // ── Feedback panel ────────────────────────────────────────────────────────────
 
@@ -126,6 +127,10 @@ function SharpenContent() {
   const searchParams = useSearchParams();
   const conceptId = searchParams.get('conceptId'); // null when none supplied
   const level = (searchParams.get('level') as QuestionLevel | null) ?? null;
+  const returnTarget = assessmentReturn(
+    searchParams.get('returnTo'),
+    conceptId ? `/brain-map?conceptId=${conceptId}` : '/brain-map',
+  );
 
   // Local dummy concept — only the old demo concepts (c1xx, s2xx) live here.
   const localConcept = conceptId ? CONCEPT_BY_ID[conceptId] : undefined;
@@ -145,7 +150,6 @@ function SharpenContent() {
   const masteryState = (apiConcept?.progress?.state ?? localConcept?.state ?? 'WEAK') as keyof typeof MASTERY_MAP;
 
   const stationLabel = level ? LEVEL_TO_STATION_LABEL[level] : null;
-  const backToMapHref = conceptId ? `/brain-map?conceptId=${conceptId}` : '/brain-map';
 
   // Local fallback questions. ONLY the old demo concepts have local questions;
   // real DB concepts always load from the API. The photosynthesis demo set is
@@ -390,7 +394,10 @@ function SharpenContent() {
               {/* Passed + next level exists → go to next station */}
               {!aiStillGrading && passed && nextLevel && (
                 <button
-                  onClick={() => router.push(`/sharpen?conceptId=${conceptId}&level=${nextLevel}`)}
+                  onClick={() => router.push(assessmentHref('/sharpen', {
+                    conceptId: conceptId ?? undefined,
+                    level: nextLevel,
+                  }, returnTarget.href))}
                   className="px-6 py-3 rounded-xl font-bold text-sm text-white"
                   style={{ background: COLORS.strong }}
                 >
@@ -400,11 +407,11 @@ function SharpenContent() {
               {/* Passed + no next level → all stations done, back to map */}
               {!aiStillGrading && passed && !nextLevel && (
                 <button
-                  onClick={() => router.push(backToMapHref)}
+                  onClick={() => router.push(returnTarget.href)}
                   className="px-6 py-3 rounded-xl font-bold text-sm text-white"
                   style={{ background: COLORS.strong }}
                 >
-                  🎉 Concept complete — Back to Brain Map
+                  🎉 Concept complete — Back to {returnTarget.label}
                 </button>
               )}
               {/* Failed → retry this level */}
@@ -418,11 +425,11 @@ function SharpenContent() {
                 </button>
               )}
               <button
-                onClick={() => router.push(backToMapHref)}
+                onClick={() => router.push(returnTarget.href)}
                 className="px-6 py-3 rounded-xl font-bold text-sm"
                 style={{ background: 'rgba(0,0,0,0.05)', color: '#78716c' }}
               >
-                ← Back to Brain Map
+                ← Back to {returnTarget.label}
               </button>
             </div>
           </div>
@@ -465,11 +472,11 @@ function SharpenContent() {
                     : 'Pick a concept from your Brain Map to start practising.'}
                 </p>
                 <button
-                  onClick={() => router.push(backToMapHref)}
+                  onClick={() => router.push(returnTarget.href)}
                   className="px-5 py-2.5 rounded-xl font-bold text-sm"
                   style={{ background: 'rgba(0,0,0,0.05)', color: '#78716c' }}
                 >
-                  ← Back to Brain Map
+                  ← Back to {returnTarget.label}
                 </button>
               </>
             )}
@@ -498,11 +505,11 @@ function SharpenContent() {
         >
           <div>
             <button
-              onClick={() => router.push(backToMapHref)}
+              onClick={() => router.push(returnTarget.href)}
               className="flex items-center gap-1.5 mb-5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:bg-white/80"
               style={{ background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(0,0,0,0.1)', color: '#44403c' }}
             >
-              ← Back to Brain Map
+              ← Back to {returnTarget.label}
             </button>
 
             <div className="text-[10px] font-bold tracking-widest mb-1" style={{ color: subject.color }}>
@@ -619,7 +626,10 @@ function TodaysFixReport() {
 
   function start(item: ApiTodayItem) {
     const st = flaggedStation(item);
-    router.push(`/sharpen?conceptId=${item.id}&level=${st.level}`);
+    router.push(assessmentHref('/sharpen', {
+      conceptId: item.id,
+      level: st.level,
+    }, '/sharpen'));
   }
 
   return (

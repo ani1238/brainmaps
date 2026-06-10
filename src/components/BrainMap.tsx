@@ -8,6 +8,7 @@ import { RightPanel } from './RightPanel';
 import type { Concept } from '@/types';
 import { CONCEPT_DATA, CONCEPT_BY_ID, ENGLISH_TRACKS } from '@/data/dummy';
 import { fetchChapters, fetchConcept, fetchConcepts, type ApiChapter, type ApiConceptDetail } from '@/lib/api';
+import { assessmentHref } from '@/lib/navigation';
 
 type MapLevel = 'subject' | 'chapter' | 'concept' | 'english';
 
@@ -368,8 +369,16 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
             subjectName={sd.label}
             subjectColor={sd.color}
             onClose={() => { setShowPanel(false); setSelectedConcept(null); }}
-            onStartSharpen={() => router.push(`/sharpen?conceptId=${selectedConcept.id}`)}
-            onStartRecall={() => router.push(`/recall?conceptId=${selectedConcept.id}`)}
+            onStartSharpen={() => router.push(assessmentHref(
+              '/sharpen',
+              { conceptId: selectedConcept.id },
+              `/brain-map?conceptId=${selectedConcept.id}`,
+            ))}
+            onStartRecall={() => router.push(assessmentHref(
+              '/recall',
+              { conceptId: selectedConcept.id },
+              `/brain-map?conceptId=${selectedConcept.id}`,
+            ))}
           />
         );
       })()}
