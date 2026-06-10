@@ -309,14 +309,17 @@ func selectRetryQuestions(all []models.Question, weak []string) []models.Questio
 
 	weakSet := map[string]bool{}
 	for _, w := range weak {
-		weakSet[strings.ToLower(strings.TrimSpace(w))] = true
+		if normalized := strings.ToLower(strings.TrimSpace(w)); normalized != "" {
+			weakSet[normalized] = true
+		}
 	}
 
 	var matched, rest []models.Question
 	for _, q := range all {
 		hit := false
 		for _, kc := range q.KeyConcepts {
-			if weakSet[strings.ToLower(strings.TrimSpace(kc))] {
+			normalized := strings.ToLower(strings.TrimSpace(kc))
+			if normalized != "" && weakSet[normalized] {
 				hit = true
 				break
 			}
@@ -332,7 +335,12 @@ func selectRetryQuestions(all []models.Question, weak []string) []models.Questio
 		return all // nothing tagged / no overlap — fall back to the full level
 	}
 
-	out := matched
+	if len(matched) >= target {
+		return matched[:target]
+	}
+
+	out := make([]models.Question, 0, min(target, len(all)))
+	out = append(out, matched...)
 	for i := 0; len(out) < target && i < len(rest); i++ {
 		out = append(out, rest[i])
 	}

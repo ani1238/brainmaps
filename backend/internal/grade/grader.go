@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -675,6 +676,7 @@ func storeWeakConcepts(ctx context.Context, sessionID, studentID, conceptID stri
 	for k := range set {
 		weak = append(weak, k)
 	}
+	sort.Strings(weak)
 
 	db.Pool.Exec(ctx, `
 		UPDATE concept_progress SET weak_concepts = $3
