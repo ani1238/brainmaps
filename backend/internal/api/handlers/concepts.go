@@ -266,14 +266,45 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 			err := db.Pool.QueryRow(r.Context(), fmt.Sprintf(
 				`SELECT %s, weak_concepts FROM concept_progress WHERE student_id = $1 AND concept_id = $2`, col,
 			), student, conceptID).Scan(&state, &weak)
-			if err == nil && state == "needs_fixing" && len(weak) > 0 {
-				selected = selectRetryQuestions(questions, weak)
+			if err == nil && state == "needs_fixing" {
+				recent := latestAttemptQuestionIDs(r, student, conceptID, level)
+				selected = selectRetryQuestions(questions, weak, recent)
 			}
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(selected)
+}
+
+func latestAttemptQuestionIDs(r *http.Request, studentID, conceptID, level string) map[string]bool {
+	rows, err := db.Pool.Query(r.Context(), `
+		SELECT sa.question_id
+		FROM session_answers sa
+		WHERE sa.session_id = (
+			SELECT id
+			FROM sessions
+			WHERE student_id = $1
+			  AND concept_id = $2
+			  AND station = $3
+			  AND completed_at IS NOT NULL
+			ORDER BY completed_at DESC
+			LIMIT 1
+		)
+	`, studentID, conceptID, level)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	recent := make(map[string]bool)
+	for rows.Next() {
+		var questionID string
+		if rows.Scan(&questionID) == nil {
+			recent[questionID] = true
+		}
+	}
+	return recent
 }
 
 // levelStateCol maps a question level to its concept_progress station column.
@@ -302,7 +333,7 @@ func levelStateCol(level string) string {
 // this is where we'll generate fresh AI questions targeting `weak` instead of
 // padding with unrelated ones — the rest of the pipeline already keys off
 // key_concepts, so generated questions just need to be tagged the same way.
-func selectRetryQuestions(all []models.Question, weak []string) []models.Question {
+func selectRetryQuestions(all []models.Question, weak []string, recent map[string]bool) []models.Question {
 	const target = 6
 
 	weakSet := map[string]bool{}
@@ -312,7 +343,7 @@ func selectRetryQuestions(all []models.Question, weak []string) []models.Questio
 		}
 	}
 
-	var matched, rest []models.Question
+	var unseenMatched, unseenRest, recentMatched, recentRest []models.Question
 	for _, q := range all {
 		hit := false
 		for _, kc := range q.KeyConcepts {
@@ -322,36 +353,52 @@ func selectRetryQuestions(all []models.Question, weak []string) []models.Questio
 				break
 			}
 		}
-		if hit {
-			matched = append(matched, q)
-		} else {
-			rest = append(rest, q)
+		switch {
+		case hit && !recent[q.ID]:
+			unseenMatched = append(unseenMatched, q)
+		case !hit && !recent[q.ID]:
+			unseenRest = append(unseenRest, q)
+		case hit:
+			recentMatched = append(recentMatched, q)
+		default:
+			recentRest = append(recentRest, q)
 		}
 	}
 
-	if len(matched) == 0 {
-		return selectDiverseQuestions(all, nil, target)
+	if len(unseenMatched)+len(recentMatched) == 0 {
+		return selectDiverseQuestionPools(target, unseenRest, recentRest)
 	}
 
-	return selectDiverseQuestions(matched, rest, target)
+	return selectDiverseQuestionPools(target, unseenMatched, unseenRest, recentMatched, recentRest)
 }
 
 // selectDiverseQuestions selects from primary before fallback, taking one
 // question per available type before repeating a type. This keeps sessions
 // compact while exposing the student to the broadest available interaction mix.
 func selectDiverseQuestions(primary, fallback []models.Question, target int) []models.Question {
+	return selectDiverseQuestionPools(target, primary, fallback)
+}
+
+// selectDiverseQuestionPools preserves pool priority while maximizing type
+// variety across all pools. Retry pools are ordered so unseen questions always
+// win over questions from the latest attempt.
+func selectDiverseQuestionPools(target int, pools ...[]models.Question) []models.Question {
 	if target <= 0 {
 		return []models.Question{}
 	}
 
-	out := make([]models.Question, 0, min(target, len(primary)+len(fallback)))
+	total := 0
+	for _, pool := range pools {
+		total += len(pool)
+	}
+	out := make([]models.Question, 0, min(target, total))
 	selected := make(map[string]bool)
 	usedTypes := make(map[models.QuestionType]bool)
 
-	addNewTypes := func(pool []models.Question) {
+	for _, pool := range pools {
 		for _, q := range pool {
 			if len(out) >= target {
-				return
+				return out
 			}
 			if !selected[q.ID] && !usedTypes[q.Type] {
 				out = append(out, q)
@@ -360,10 +407,11 @@ func selectDiverseQuestions(primary, fallback []models.Question, target int) []m
 			}
 		}
 	}
-	fill := func(pool []models.Question) {
+
+	for _, pool := range pools {
 		for _, q := range pool {
 			if len(out) >= target {
-				return
+				return out
 			}
 			if !selected[q.ID] {
 				out = append(out, q)
@@ -371,10 +419,5 @@ func selectDiverseQuestions(primary, fallback []models.Question, target int) []m
 			}
 		}
 	}
-
-	addNewTypes(primary)
-	fill(primary)
-	addNewTypes(fallback)
-	fill(fallback)
 	return out
 }

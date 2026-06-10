@@ -48,7 +48,7 @@ func TestSelectRetryQuestions(t *testing.T) {
 			name: "matches case insensitively and caps at six diverse questions",
 			all:  questions,
 			weak: []string{" Fractions "},
-			want: []string{"q1", "q3", "q5", "q6", "q7", "q8"},
+			want: []string{"q1", "q3", "q5", "q6", "q4", "q7"},
 		},
 		{
 			name: "pads a weakness match with diverse remaining questions",
@@ -81,7 +81,7 @@ func TestSelectRetryQuestions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := selectRetryQuestions(tt.all, tt.weak)
+			got := selectRetryQuestions(tt.all, tt.weak, nil)
 			gotIDs := make([]string, len(got))
 			for i, q := range got {
 				gotIDs[i] = q.ID
@@ -90,6 +90,77 @@ func TestSelectRetryQuestions(t *testing.T) {
 				t.Fatalf("selected IDs = %v, want %v", gotIDs, tt.want)
 			}
 		})
+	}
+}
+
+func TestSelectRetryQuestionsAvoidsLatestAttempt(t *testing.T) {
+	questions := []models.Question{
+		{ID: "old-fix", Type: models.QuestionType("FIX_IT"), KeyConcepts: []string{"plural nouns"}},
+		{ID: "old-spot", Type: models.QuestionType("SPOT_IT"), KeyConcepts: []string{"plural nouns"}},
+		{ID: "old-mcq", Type: models.MCQ, KeyConcepts: []string{"plural nouns"}},
+		{ID: "new-fix", Type: models.QuestionType("FIX_IT"), KeyConcepts: []string{"plural nouns"}},
+		{ID: "new-spot", Type: models.QuestionType("SPOT_IT"), KeyConcepts: []string{"plural nouns"}},
+		{ID: "new-produce", Type: models.QuestionType("PRODUCE_IT"), KeyConcepts: []string{"plural nouns"}},
+		{ID: "new-desc", Type: models.Descriptive, KeyConcepts: []string{"plural nouns"}},
+		{ID: "new-mcq", Type: models.MCQ, KeyConcepts: []string{"plural nouns"}},
+		{ID: "new-fix-2", Type: models.QuestionType("FIX_IT"), KeyConcepts: []string{"plural nouns"}},
+	}
+	recent := map[string]bool{
+		"old-fix":  true,
+		"old-spot": true,
+		"old-mcq":  true,
+	}
+
+	got := selectRetryQuestions(questions, []string{"plural nouns"}, recent)
+	gotIDs := make([]string, len(got))
+	for i, q := range got {
+		gotIDs[i] = q.ID
+		if recent[q.ID] {
+			t.Fatalf("selected recent question %q despite enough unseen alternatives", q.ID)
+		}
+	}
+	want := []string{"new-fix", "new-spot", "new-produce", "new-desc", "new-mcq", "new-fix-2"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
+	}
+}
+
+func TestSelectRetryQuestionsReusesRecentOnlyWhenNeeded(t *testing.T) {
+	questions := []models.Question{
+		{ID: "old-fix", Type: models.QuestionType("FIX_IT"), KeyConcepts: []string{"plural nouns"}},
+		{ID: "old-spot", Type: models.QuestionType("SPOT_IT"), KeyConcepts: []string{"plural nouns"}},
+		{ID: "new-fix", Type: models.QuestionType("FIX_IT"), KeyConcepts: []string{"plural nouns"}},
+		{ID: "new-mcq", Type: models.MCQ, KeyConcepts: []string{"plural nouns"}},
+	}
+	recent := map[string]bool{"old-fix": true, "old-spot": true}
+
+	got := selectRetryQuestions(questions, []string{"plural nouns"}, recent)
+	gotIDs := make([]string, len(got))
+	for i, q := range got {
+		gotIDs[i] = q.ID
+	}
+	want := []string{"new-fix", "new-mcq", "old-spot", "old-fix"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
+	}
+}
+
+func TestSelectRetryQuestionsAvoidsRecentWithoutMatchingWeakTags(t *testing.T) {
+	questions := []models.Question{
+		{ID: "old-fix", Type: models.QuestionType("FIX_IT"), KeyConcepts: []string{"plural nouns"}},
+		{ID: "new-fix", Type: models.QuestionType("FIX_IT"), KeyConcepts: []string{"abstract nouns"}},
+		{ID: "new-spot", Type: models.QuestionType("SPOT_IT"), KeyConcepts: []string{"abstract nouns"}},
+	}
+	recent := map[string]bool{"old-fix": true}
+
+	got := selectRetryQuestions(questions, []string{"unmatched tag"}, recent)
+	gotIDs := make([]string, len(got))
+	for i, q := range got {
+		gotIDs[i] = q.ID
+	}
+	want := []string{"new-fix", "new-spot", "old-fix"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("selected IDs = %v, want %v", gotIDs, want)
 	}
 }
 
