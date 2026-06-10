@@ -2,14 +2,15 @@
 
 # BrainMaps — Master Source of Truth
 
-**Version 9.0 · Real-Time Architecture**
+**Version 10.0 · Adaptive Retry Architecture**
 
 | Target Audience | CBSE / ICSE Classes 5–7 (primary), 3–4 (Phase 2) |
 | :--- | :--- |
-| Status | In Development — v9 architecture |
-| Replaces | All prior versions (including v7/v8). This document is the single canonical reference. |
+| Status | In Development — v10 architecture |
+| Replaces | All prior versions (including v8/v9). This document is the single canonical reference. |
+| Key changes from v9 | Per-tag weak-concept lifecycle (`student_weak_concepts`); slot-based adaptive retry targeting the worst misconceptions; tag-gated level pass (score AND targeted tags); spaced recheck of cleared tags in Revise — the misconception-graph moat (§8.1). |
 | Key changes from v8 | Shifted from nightly batch processing to Real-Time AI Grading & Routing; Instant promotion to "Today's Fix" (needs_fixing state) upon level failure; Fully async queue architecture for grading. |
-| Last updated | 2026-06-11 — per-tag weak-concept lifecycle + slot-based adaptive retry shipped (see §19 Date Log) |
+| Last updated | 2026-06-11 — see §19 Date Log |
 
 ---
 
@@ -954,4 +955,4 @@ Running log of what shipped, newest first. Commit hashes refer to the `brainmaps
 
 ---
 
-*— End of Master Source of Truth v9.0 (last updated 2026-06-11) —*
+*— End of Master Source of Truth v10.0 (last updated 2026-06-11) —*
