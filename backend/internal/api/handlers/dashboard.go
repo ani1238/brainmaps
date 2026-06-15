@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	authmw "github.com/ani1238/brainmaps-api/internal/api/middleware"
 	"github.com/ani1238/brainmaps-api/internal/db"
 )
 
@@ -59,12 +60,23 @@ type DashboardResp struct {
 	NeedsAttention []ConceptNote   `json:"needsAttention"`
 }
 
+func activeStreakDays(storedDays, daysSinceActivity int) int {
+	if daysSinceActivity < 0 || daysSinceActivity > 1 {
+		return 0
+	}
+	return storedDays
+}
+
 // GET /api/v1/dashboard?student=<uuid>
 // Aggregates everything the Today Home + My Progress screens need.
 func GetDashboard(w http.ResponseWriter, r *http.Request) {
 	studentID := r.URL.Query().Get("student")
 	if studentID == "" {
 		http.Error(w, "student is required", http.StatusBadRequest)
+		return
+	}
+	if !authmw.AuthorizeStudent(r, studentID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	ctx := r.Context()
@@ -126,9 +138,15 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── 2. Streak ────────────────────────────────────────────────────────────
+	var storedStreak, daysSinceActivity int
 	db.Pool.QueryRow(ctx, `
-		SELECT COALESCE(streak_days,0), COALESCE(streak_best,0) FROM students WHERE id = $1
-	`, studentID).Scan(&resp.Streak.Days, &resp.Streak.Best)
+		SELECT COALESCE(streak_days, 0),
+		       COALESCE(streak_best, 0),
+		       COALESCE(current_date - streak_last_date, 2147483647)
+		FROM students
+		WHERE id = $1
+	`, studentID).Scan(&storedStreak, &resp.Streak.Best, &daysSinceActivity)
+	resp.Streak.Days = activeStreakDays(storedStreak, daysSinceActivity)
 
 	// ── 3. Activity — last 30 days (sessions per day) ──────────────────────────
 	counts := map[string]int{}

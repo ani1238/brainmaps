@@ -1,4 +1,12 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BrainMaps
+
+BrainMaps is an adaptive assessment and recall system for school students.
+
+## Project Documents
+
+- [Master product specification](docs/BrainMaps_Master_SoT_v10.md)
+- [Product and engineering backlog](docs/plans/product-backlog.md)
+- [Adaptive retry plan](docs/plans/adaptive-retry-weak-tag-lifecycle.md)
 
 ## Getting Started
 

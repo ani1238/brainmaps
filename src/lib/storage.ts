@@ -5,10 +5,10 @@ import type {
   StudentProgress,
   ConceptProgress,
   StationKey,
-  StationStatus,
   MasteryState,
   SessionRecord,
 } from '@/types';
+import { useSyncExternalStore } from 'react';
 import {
   EMA_WEIGHTS,
   MASTERY_THRESHOLDS,
@@ -19,11 +19,14 @@ import {
 // ─── Storage keys ─────────────────────────────────────────────────────────────
 
 const KEYS = {
-  profile:  'bm_profile',
-  progress: 'bm_progress',
+  profile:   'bm_profile',
+  progress:  'bm_progress',
+  authToken: 'bm_auth_token',
 } as const;
 
 // ─── Student profile ──────────────────────────────────────────────────────────
+
+const PROFILE_EVENT = 'brainmaps:profile-change';
 
 export function getProfile(): StudentProfile | null {
   if (typeof window === 'undefined') return null;
@@ -35,11 +38,51 @@ export function getProfile(): StudentProfile | null {
 
 export function saveProfile(profile: StudentProfile): void {
   localStorage.setItem(KEYS.profile, JSON.stringify(profile));
+  window.dispatchEvent(new Event(PROFILE_EVENT));
 }
+
+// ─── Auth token ───────────────────────────────────────────────────────────────
+
+export function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(KEYS.authToken);
+}
+
+export function saveAuthToken(token: string): void {
+  localStorage.setItem(KEYS.authToken, token);
+}
+
+export function clearAuthToken(): void {
+  localStorage.removeItem(KEYS.authToken);
+}
+
+// ─── Clear everything on logout ───────────────────────────────────────────────
 
 export function clearProfile(): void {
   localStorage.removeItem(KEYS.profile);
   localStorage.removeItem(KEYS.progress);
+  localStorage.removeItem(KEYS.authToken);
+  window.dispatchEvent(new Event(PROFILE_EVENT));
+}
+
+function subscribeProfile(onStoreChange: () => void): () => void {
+  window.addEventListener('storage', onStoreChange);
+  window.addEventListener(PROFILE_EVENT, onStoreChange);
+  return () => {
+    window.removeEventListener('storage', onStoreChange);
+    window.removeEventListener(PROFILE_EVENT, onStoreChange);
+  };
+}
+
+function getProfileSnapshot(): string | null {
+  return localStorage.getItem(KEYS.profile);
+}
+
+export function useProfile(): StudentProfile | null {
+  const raw = useSyncExternalStore(subscribeProfile, getProfileSnapshot, () => null);
+  if (!raw) return null;
+  try { return JSON.parse(raw) as StudentProfile; }
+  catch { return null; }
 }
 
 // ─── Student progress ─────────────────────────────────────────────────────────

@@ -1,11 +1,54 @@
 package handlers
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ani1238/brainmaps-api/internal/models"
 )
+
+func TestActiveQuestionsDoNotExposeAnswers(t *testing.T) {
+	explanation := "The hidden explanation"
+	rubric := "The hidden rubric"
+	questions := []models.Question{{
+		ID:          "q1",
+		ConceptID:   "c1",
+		Type:        models.MCQ,
+		Level:       models.Level1,
+		Text:        "Which option is correct?",
+		Explanation: &explanation,
+		RubricHint:  &rubric,
+		KeyConcepts: []string{"hidden key concept"},
+		Options: []models.MCQOption{
+			{Key: "a", Text: "First", IsCorrect: false},
+			{Key: "b", Text: "Second", IsCorrect: true},
+		},
+	}}
+
+	raw, err := json.Marshal(activeQuestions(questions))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	for _, forbidden := range []string{
+		"isCorrect",
+		"explanation",
+		"rubricHint",
+		"keyConcepts",
+		"hidden explanation",
+		"hidden rubric",
+		"hidden key concept",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("active question response leaked %q: %s", forbidden, body)
+		}
+	}
+	if !strings.Contains(body, `"key":"b"`) || !strings.Contains(body, `"text":"Second"`) {
+		t.Fatalf("active question response lost safe option data: %s", body)
+	}
+}
 
 func TestLevelStateCol(t *testing.T) {
 	tests := map[string]string{

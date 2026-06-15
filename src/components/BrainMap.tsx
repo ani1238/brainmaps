@@ -58,8 +58,6 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
   const [showPanel, setShowPanel] = useState(false);
   const [chapters, setChapters] = useState<ApiChapter[]>([]);
 
-  // "center" of the orbit area (exclude left rail 240px)
-  const cx = width / 2;
   const cy = height / 2 - 20;
 
   const panelW = showPanel ? 420 : 0;

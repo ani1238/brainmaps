@@ -17,7 +17,7 @@ import (
 	"github.com/ani1238/brainmaps-api/internal/models"
 )
 
-// GradeResult is what the Gemini API returns for one answer.
+// GradeResult is the normalized result returned for one answer.
 type GradeResult struct {
 	Score    float64 `json:"score"`
 	Feedback string  `json:"feedback"`
@@ -26,7 +26,8 @@ type GradeResult struct {
 // GradeOpenAnswers runs async after a session completes.
 // It grades EVERY non-MCQ answer (DESCRIPTIVE, FEYNMAN, BLURT, ACTIVE_RECALL,
 // SPOT_IT, FIX_IT, PRODUCE_IT, CONTEXT_CLUE, GENERATIVE_PRODUCTION, …) via
-// Gemini Flash, then recomputes the session score and updates concept_progress.
+// an available AI provider, then recomputes the session score and updates
+// concept_progress.
 func GradeOpenAnswers(sessionID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -83,7 +84,7 @@ func GradeOpenAnswers(sessionID string) {
 		return
 	}
 
-	// 2. Grade EVERY answer in a SINGLE Gemini call. A session is always one
+	// 2. Grade EVERY answer in a SINGLE model call. A session is always one
 	//    concept + one station, so all answers share the same curriculum
 	//    context — we send them together instead of one call per answer.
 	shared := answers[0]
@@ -138,12 +139,20 @@ type gradeItem struct {
 	RubricHint  *string
 }
 
-// Models used for grading.
+// Stable default models used for grading. Each can be overridden at runtime so
+// model migrations do not require a backend deployment.
 const (
-	groqModel   = "llama-3.3-70b-versatile"  // Groq (primary — fast + free tier)
-	geminiModel = "gemini-flash-lite-latest" // cheap Gemini tier (fallback)
-	openAIModel = "gpt-5.4-mini"             // OpenAI Responses API (fallback)
+	defaultGroqModel   = "llama-3.3-70b-versatile"
+	defaultGeminiModel = "gemini-3.1-flash-lite"
+	defaultOpenAIModel = "gpt-5.4-mini"
 )
+
+func configuredModel(envKey, fallback string) string {
+	if model := strings.TrimSpace(os.Getenv(envKey)); model != "" {
+		return model
+	}
+	return fallback
+}
 
 // gradeBatch grades every answer in a session with ONE model call, and in the
 // same call asks the model which key ideas the student is weak in. It always
@@ -219,7 +228,7 @@ func callModel(ctx context.Context, prompt string) (string, error) {
 // and returns the model's text output (expected to be the grading JSON).
 func callGroqRaw(ctx context.Context, apiKey, prompt string) (string, error) {
 	payload := map[string]any{
-		"model":           groqModel,
+		"model":           configuredModel("GROQ_MODEL", defaultGroqModel),
 		"messages":        []map[string]any{{"role": "user", "content": prompt}},
 		"response_format": map[string]any{"type": "json_object"},
 		"temperature":     0.2,
@@ -268,7 +277,7 @@ func callGroqRaw(ctx context.Context, apiKey, prompt string) (string, error) {
 // model's text output (expected to be the grading JSON).
 func callOpenAIRaw(ctx context.Context, apiKey, prompt string) (string, error) {
 	payload := map[string]any{
-		"model": openAIModel,
+		"model": configuredModel("OPENAI_MODEL", defaultOpenAIModel),
 		"input": prompt,
 		"text": map[string]any{
 			"format": map[string]any{"type": "json_object"},
@@ -340,7 +349,8 @@ func callGeminiRaw(ctx context.Context, apiKey, prompt string) (string, error) {
 	}
 
 	body, _ := json.Marshal(payload)
-	url := "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent"
+	model := configuredModel("GEMINI_MODEL", defaultGeminiModel)
+	url := "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -609,8 +619,10 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 
 	// Update per-station state based on outcome. A retry must also demonstrate
 	// every targeted weak tag (>= 50% of its questions) — score alone can't pass.
+	stationPassed := false
 	if curCol != "" {
-		if levelPassGate(sessionScore, isRetry, targeted) {
+		stationPassed = levelPassGate(sessionScore, isRetry, targeted)
+		if stationPassed {
 			// Passed: mark current station done and unlock the next one
 			nextSt := nextStationKey(models.StationKey(station))
 			nextCol := stationStateCol(nextSt)
@@ -634,8 +646,9 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 			), studentID, conceptID)
 		}
 	}
+	unlockReviseIfEligible(ctx, studentID, conceptID)
 	if models.StationKey(station) == models.StationRevise {
-		updateReviseSchedule(ctx, studentID, conceptID, sessionScore >= 0.80)
+		updateReviseSchedule(ctx, studentID, conceptID, stationPassed && sessionScore >= 0.80)
 	}
 
 	updateWeakConceptLifecycle(ctx, studentID, conceptID, sessionWeakSet(ctx, sessionID, aiWeak), tested)
@@ -675,6 +688,35 @@ func updateReviseSchedule(ctx context.Context, studentID, conceptID string, pass
 		      next_due_at = EXCLUDED.next_due_at,
 		      last_done_at = EXCLUDED.last_done_at
 	`, studentID, conceptID, next)
+}
+
+// unlockReviseIfEligible opens Revise once Levels 1–3 are done and mastery is
+// strong. Strengthen remains optional, and the first recall is scheduled for
+// the next day.
+func unlockReviseIfEligible(ctx context.Context, studentID, conceptID string) {
+	var unlocked bool
+	err := db.Pool.QueryRow(ctx, `
+		UPDATE concept_progress
+		SET revise_unlocked = true,
+		    revise_state = CASE WHEN revise_state = 'locked' THEN 'current' ELSE revise_state END
+		WHERE student_id = $1
+		  AND concept_id = $2
+		  AND l1_state = 'done'
+		  AND l2_state = 'done'
+		  AND l3_state = 'done'
+		  AND ema_score >= 0.80
+		RETURNING true
+	`, studentID, conceptID).Scan(&unlocked)
+	if err != nil || !unlocked {
+		return
+	}
+
+	db.Pool.Exec(ctx, `
+		INSERT INTO revise_schedule
+		  (student_id, concept_id, interval_days, next_due_at)
+		VALUES ($1, $2, 1, now() + interval '1 day')
+		ON CONFLICT (student_id, concept_id) DO NOTHING
+	`, studentID, conceptID)
 }
 
 // updateStreak bumps the student's daily streak on session completion.
@@ -908,8 +950,6 @@ func nextStationKey(station models.StationKey) models.StationKey {
 		return models.StationLevel3
 	case models.StationLevel3:
 		return models.StationStrengthen
-	case models.StationStrengthen:
-		return models.StationRevise
 	default:
 		return ""
 	}

@@ -7,8 +7,8 @@ import { GridBackground } from '@/components/GridBackground';
 import { LeftRail } from '@/components/LeftRail';
 import { COLORS, SUBJECT_MAP } from '@/lib/tokens';
 import { fetchDashboard, fetchToday, type ApiDashboard, type ApiToday } from '@/lib/api';
-import { getProfile } from '@/lib/storage';
-import { assessmentHref } from '@/lib/navigation';
+import { useProfile } from '@/lib/storage';
+import { assessmentHref, failedStation } from '@/lib/navigation';
 
 function todayLabel() {
   return new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -23,12 +23,9 @@ export default function DashboardPage() {
   const [dash, setDash] = useState<ApiDashboard | null>(null);
   const [today, setToday] = useState<ApiToday | null>(null);
   const [loading, setLoading] = useState(true);
-  const [dateLabel, setDateLabel] = useState(''); // client-only → avoids SSR hydration mismatch
-  const [studentName, setStudentName] = useState('Student');
+  const profile = useProfile();
 
   useEffect(() => {
-    setDateLabel(todayLabel());
-    setStudentName(getProfile()?.name ?? 'Student');
     Promise.all([fetchDashboard(), fetchToday()])
       .then(([d, t]) => { setDash(d); setToday(t); })
       .catch(() => {})
@@ -67,9 +64,9 @@ export default function DashboardPage() {
         >
           <div className="flex justify-between items-start gap-6 mb-4">
             <div>
-              <div className="text-xs font-bold mb-0.5" style={{ color: '#78716c' }}>{dateLabel}</div>
+              <div className="text-xs font-bold mb-0.5" style={{ color: '#78716c' }}>{todayLabel()}</div>
               <div className="flex items-baseline gap-3 flex-wrap">
-                <h1 className="text-3xl font-extrabold leading-none" style={{ color: '#1c1917' }}>Hi {studentName}! 👋</h1>
+                <h1 className="text-3xl font-extrabold leading-none" style={{ color: '#1c1917' }}>Hi {profile?.name ?? 'Student'}! 👋</h1>
                 <span className="text-sm" style={{ color: '#78716c' }}>About {estMin} minutes today</span>
               </div>
             </div>
@@ -82,7 +79,7 @@ export default function DashboardPage() {
           <div className="flex items-center gap-4">
             <div className="flex-shrink-0">
               <div className="text-xs font-bold" style={{ color: '#78716c' }}>Your brain today</div>
-              <div className="text-xs" style={{ color: '#78716c' }}>{total} things you're learning</div>
+              <div className="text-xs" style={{ color: '#78716c' }}>{total} things you&apos;re learning</div>
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex h-4 rounded-full overflow-hidden" style={{ border: '1px solid rgba(0,0,0,0.1)' }}>
@@ -135,7 +132,7 @@ export default function DashboardPage() {
           <div className="rounded-2xl p-5" style={{ background: 'rgba(255,247,237,0.9)', border: '1.5px solid rgba(249,115,22,0.3)', backdropFilter: 'blur(12px)' }}>
             <div className="flex justify-between items-start gap-3">
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold mb-1" style={{ color: COLORS.weak }}>🔧 Today's Fix</div>
+                <div className="text-xs font-bold mb-1" style={{ color: COLORS.weak }}>🔧 Today&apos;s Fix</div>
                 <h2 className="text-2xl font-extrabold" style={{ color: '#1c1917' }}>
                   {fixCount > 0 ? `${fixCount} to fix · about ${fixCount * 3} min` : 'Nothing to fix 🎉'}
                 </h2>
@@ -154,7 +151,7 @@ export default function DashboardPage() {
                 <button
                   onClick={() => router.push(assessmentHref('/sharpen', {
                     conceptId: fixFirst.id,
-                    level: 'level1',
+                    level: failedStation(fixFirst.progress).level,
                   }, '/dashboard'))}
                   className="flex-shrink-0 px-4 py-2.5 rounded-xl font-bold text-sm text-white transition-all hover:opacity-90 active:scale-[0.98]"
                   style={{ background: COLORS.weak, boxShadow: '0 4px 16px rgba(249,115,22,0.3)' }}

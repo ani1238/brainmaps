@@ -13,13 +13,14 @@ import { splitStations } from '@/data/society';
 import { STATION_LABELS } from '@/lib/tokens';
 import type { QuestionLevel } from '@/types';
 import {
-  fetchConcept, fetchQuestions, startSession, completeSession, getSession, fetchToday,
-  type SubmitAnswer, type SessionResult, type AnswerFeedback, type ApiConceptDetail, type ApiTodayItem,
+  fetchConcept, fetchQuestions, startSession, completeSession, getSession, getSessionReview, fetchToday,
+  type ActiveSession, type SubmitAnswer, type SessionResult, type SessionReview,
+  type SessionReviewAnswer, type ApiConceptDetail, type ApiTodayItem,
 } from '@/lib/api';
 import type { Question } from '@/types';
-import { assessmentHref, assessmentReturn } from '@/lib/navigation';
+import { assessmentHref, assessmentReturn, failedStation } from '@/lib/navigation';
 
-// ── Feedback panel ────────────────────────────────────────────────────────────
+// ── Completed-session answer review ──────────────────────────────────────────
 
 const Q_TYPE_LABEL: Record<string, string> = {
   MCQ:                   'Multiple choice',
@@ -34,14 +35,15 @@ const Q_TYPE_LABEL: Record<string, string> = {
   CONTEXT_CLUE:          'Use the clues',
 };
 
-function FeedbackCard({ item }: { item: AnswerFeedback }) {
-  const isMCQ = item.questionType === 'MCQ';
-  const scoreColor = isMCQ ? '#ef4444'
-    : item.score >= 0.75 ? '#22c55e'
-    : item.score >= 0.45 ? '#f97316'
-    : '#ef4444';
-  const scoreLabel = isMCQ ? 'Incorrect' : `${Math.round(item.score * 100)}%`;
-  const icon = isMCQ ? '❌' : item.score >= 0.75 ? '✅' : item.score >= 0.45 ? '🟡' : '🔴';
+function ReviewCard({ item }: { item: SessionReviewAnswer }) {
+  const [showAnswer, setShowAnswer] = useState(false);
+  const score = item.score ?? (item.isCorrect ? 1 : 0);
+  const scoreColor = score >= 0.75 ? '#22c55e' : score >= 0.45 ? '#f97316' : '#ef4444';
+  const scoreLabel = item.isCorrect != null
+    ? item.isCorrect ? 'Correct' : 'Needs another look'
+    : `${Math.round(score * 100)}%`;
+  const icon = score >= 0.75 ? '✓' : score >= 0.45 ? '•' : '×';
+  const hasAnswer = Boolean(item.correctAnswer || item.answerGuide || item.explanation);
 
   return (
     <div
@@ -52,7 +54,7 @@ function FeedbackCard({ item }: { item: AnswerFeedback }) {
       <div className="flex items-center justify-between px-4 py-2.5"
         style={{ background: `${scoreColor}10`, borderBottom: `1px solid ${scoreColor}20` }}>
         <div className="flex items-center gap-2">
-          <span className="text-sm">{icon}</span>
+          <span className="text-sm font-black" style={{ color: scoreColor }}>{icon}</span>
           <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: scoreColor }}>
             {Q_TYPE_LABEL[item.questionType] ?? item.questionType}
           </span>
@@ -75,31 +77,70 @@ function FeedbackCard({ item }: { item: AnswerFeedback }) {
               Your answer
             </div>
             <p className="text-xs leading-relaxed italic" style={{ color: '#44403c' }}>
-              "{item.studentAnswer.length > 300
+              &ldquo;{item.studentAnswer.length > 300
                 ? item.studentAnswer.slice(0, 297) + '…'
-                : item.studentAnswer}"
+                : item.studentAnswer}&rdquo;
             </p>
           </div>
         )}
 
-        {/* AI feedback */}
-        <div>
+        {item.feedback && <div>
           <div className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#a8a29e' }}>
-            {isMCQ ? 'Why the correct answer is right' : 'AI feedback'}
+            Feedback
           </div>
           <p className="text-xs leading-relaxed" style={{ color: '#1c1917' }}>
             {item.feedback}
           </p>
-        </div>
+        </div>}
+
+        {hasAnswer && (
+          <button
+            onClick={() => setShowAnswer(show => !show)}
+            className="w-full rounded-lg px-3 py-2 text-xs font-bold text-left"
+            style={{ background: 'rgba(79,70,229,0.07)', color: COLORS.indigo }}
+          >
+            {showAnswer ? 'Hide answer' : 'Show answer'}
+          </button>
+        )}
+
+        {showAnswer && hasAnswer && (
+          <div className="rounded-lg px-3 py-3 space-y-2"
+            style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)' }}>
+            {item.correctAnswer && (
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#16a34a' }}>
+                  Correct answer
+                </div>
+                <p className="text-xs font-semibold" style={{ color: '#1c1917' }}>{item.correctAnswer}</p>
+              </div>
+            )}
+            {item.answerGuide && (
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#16a34a' }}>
+                  Strong answer guide
+                </div>
+                <p className="text-xs leading-relaxed" style={{ color: '#1c1917' }}>{item.answerGuide}</p>
+              </div>
+            )}
+            {item.explanation && (
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#16a34a' }}>
+                  Why
+                </div>
+                <p className="text-xs leading-relaxed" style={{ color: '#1c1917' }}>{item.explanation}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function FeedbackList({ feedback }: { feedback: AnswerFeedback[] }) {
+function ReviewList({ review }: { review: SessionReview }) {
   return (
     <div className="w-full text-left mb-5 space-y-3 max-h-[28rem] overflow-y-auto pr-1">
-      {feedback.map((item, i) => <FeedbackCard key={i} item={item} />)}
+      {review.answers.map(item => <ReviewCard key={item.questionId} item={item} />)}
     </div>
   );
 }
@@ -175,7 +216,7 @@ function SharpenContent() {
   const [questions, setQuestions] = useState<Question[]>(localFallbackQuestions);
   // questionsFromApi = true means question IDs exist in the DB and we can call the API session
   const [questionsFromApi, setQuestionsFromApi] = useState(false);
-  const [loadingQuestions, setLoadingQuestions] = useState(false);
+  const [loadingQuestions, setLoadingQuestions] = useState(Boolean(level && conceptId));
 
   // ── Question tracking ───────────────────────────────────────────────────
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -185,8 +226,12 @@ function SharpenContent() {
   const collectedAnswers = useRef<SubmitAnswer[]>([]);
 
   // ── API session (only when we have real DB-backed question IDs) ─────────
-  const sessionIdRef = useRef<string | null>(null);
+  const sessionRef = useRef<ActiveSession | null>(null);
   const [apiResult, setApiResult] = useState<SessionResult | null>(null);
+  const [review, setReview] = useState<SessionReview | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch the real concept's details (name, subject, chapter, recap) from the DB.
@@ -199,28 +244,16 @@ function SharpenContent() {
     return () => { cancelled = true; };
   }, [conceptId]);
 
-  // Re-run whenever the student moves to a different level or concept
+  // The keyed parent remounts this component for every concept/level.
   useEffect(() => {
-    // 1. Reset all per-session state so the new level starts fresh
-    setCurrentIdx(0);
-    setFinished(false);
-    setCorrectCount(0);
-    setMcqCount(0);
     collectedAnswers.current = [];
-    setApiResult(null);
-    sessionIdRef.current = null;
+    sessionRef.current = null;
     if (pollRef.current) clearInterval(pollRef.current);
-
-    // 2. Show local fallback immediately (empty for real DB concepts — the
-    //    API fills it in below; this prevents a flash of wrong questions)
-    setQuestions(localFallbackQuestions());
-    setQuestionsFromApi(false);
 
     if (!level || !conceptId) return;
 
-    // 3. Always try the DB first. If it has questions, use them and start a
+    // Always try the DB first. If it has questions, use them and start a
     //    graded session. Otherwise keep whatever local fallback we have.
-    setLoadingQuestions(true);
     fetchQuestions(conceptId, level)
       .then(apiQs => {
         if (apiQs.length > 0) {
@@ -230,10 +263,9 @@ function SharpenContent() {
         }
         return null;
       })
-      .then(id => { if (id) sessionIdRef.current = id; })
+      .then(session => { if (session) sessionRef.current = session; })
       .catch(() => {})
       .finally(() => setLoadingQuestions(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conceptId, level]);
 
   // Stop polling on unmount
@@ -261,18 +293,18 @@ function SharpenContent() {
 
     // Last question — submit session to API only if questions came from DB
     setFinished(true);
-    if (questionsFromApi && sessionIdRef.current) {
+    if (questionsFromApi && sessionRef.current) {
       try {
-        const result = await completeSession(sessionIdRef.current, collectedAnswers.current);
+        const result = await completeSession(sessionRef.current, collectedAnswers.current);
         setApiResult(result);
 
-        // If Gemini is still grading, poll every 3s until done (max ~30s)
+        // If AI is still grading, poll every 3s until done (max ~30s).
         if (result.aiGrading) {
           let attempts = 0;
           pollRef.current = setInterval(async () => {
             attempts++;
             try {
-              const updated = await getSession(sessionIdRef.current!);
+              const updated = await getSession(sessionRef.current!);
               setApiResult(updated);
               if (!updated.aiGrading || attempts >= 10) {
                 clearInterval(pollRef.current!);
@@ -298,6 +330,9 @@ function SharpenContent() {
     setMcqCount(0);
     collectedAnswers.current = [];
     setApiResult(null);
+    setReview(null);
+    setReviewOpen(false);
+    setReviewError('');
     if (pollRef.current) clearInterval(pollRef.current);
 
     // Fetch a fresh adaptive set and explicitly exclude every question the
@@ -308,15 +343,34 @@ function SharpenContent() {
       try {
         const nextQuestions = await fetchQuestions(conceptId, level, excludeQuestionIds);
         setQuestions(nextQuestions.length > 0 ? nextQuestions : previousQuestions);
-        sessionIdRef.current = await startSession(conceptId, level);
+        sessionRef.current = await startSession(conceptId, level);
       } catch {
         setQuestions(previousQuestions);
         startSession(conceptId, level)
-          .then(id => { sessionIdRef.current = id; })
+          .then(session => { sessionRef.current = session; })
           .catch(() => {});
       } finally {
         setLoadingQuestions(false);
       }
+    }
+  }
+
+  async function handleReviewAnswers() {
+    if (reviewOpen) {
+      setReviewOpen(false);
+      return;
+    }
+    setReviewOpen(true);
+    if (review || !sessionRef.current) return;
+
+    setReviewLoading(true);
+    setReviewError('');
+    try {
+      setReview(await getSessionReview(sessionRef.current));
+    } catch {
+      setReviewError('Review could not be loaded. Please try again.');
+    } finally {
+      setReviewLoading(false);
     }
   }
 
@@ -335,7 +389,7 @@ function SharpenContent() {
       <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
         <GridBackground />
         <LeftRail />
-        <main className="flex-1 flex items-center justify-center">
+        <main className="flex-1 overflow-y-auto flex items-start justify-center py-8">
           <div
             className="text-center p-8 rounded-3xl w-full"
             style={{
@@ -374,7 +428,7 @@ function SharpenContent() {
                   Grading your written answers…
                 </h2>
                 <p className="text-sm mb-4" style={{ color: '#78716c' }}>
-                  Gemini AI is reading your explanation. Score will update automatically.
+                  AI is reading your explanation. Your score will update automatically.
                 </p>
                 <div className="flex justify-center mb-4">
                   <div className="flex gap-1">
@@ -396,12 +450,24 @@ function SharpenContent() {
               </>
             )}
 
-            {/* Feedback items — shown once AI grading is done (or for MCQ-only immediately) */}
-            {!aiStillGrading && apiResult && apiResult.feedback && apiResult.feedback.length > 0 && (
-              <FeedbackList feedback={apiResult.feedback} />
+            {!aiStillGrading && reviewOpen && reviewLoading && (
+              <p className="text-sm mb-5" style={{ color: '#78716c' }}>Loading your answers…</p>
             )}
+            {!aiStillGrading && reviewOpen && reviewError && (
+              <p className="text-sm mb-5" style={{ color: '#ef4444' }}>{reviewError}</p>
+            )}
+            {!aiStillGrading && reviewOpen && review && <ReviewList review={review} />}
 
             <div className="flex flex-col gap-3">
+              {!aiStillGrading && apiResult?.reviewAvailable && (
+                <button
+                  onClick={handleReviewAnswers}
+                  className="px-6 py-3 rounded-xl font-bold text-sm"
+                  style={{ background: 'rgba(79,70,229,0.08)', color: COLORS.indigo }}
+                >
+                  {reviewOpen ? 'Hide answer review' : 'Review answers'}
+                </button>
+              )}
               {/* Passed + next level exists → go to next station */}
               {!aiStillGrading && passed && nextLevel && (
                 <button
@@ -599,6 +665,7 @@ function SharpenContent() {
               onSkip={handleNext}
               onAnswer={handleAnswer}
               onSubmitAnswer={handleSubmitAnswer}
+              deferAnswerFeedback={questionsFromApi}
             />
           </div>
         </div>
@@ -611,22 +678,6 @@ function SharpenContent() {
 // Shown when /sharpen is opened with no conceptId — lists the concepts whose
 // levels need a retry, and links straight into the flagged level.
 
-const FIX_STATIONS: { key: 'l1State' | 'l2State' | 'l3State' | 'strengthenState'; level: QuestionLevel; label: string }[] = [
-  { key: 'l1State',         level: 'level1',     label: 'Level 1' },
-  { key: 'l2State',         level: 'level2',     label: 'Level 2' },
-  { key: 'l3State',         level: 'level3',     label: 'Level 3' },
-  { key: 'strengthenState', level: 'strengthen', label: 'Strengthen' },
-];
-
-function flaggedStation(item: ApiTodayItem) {
-  const p = item.progress;
-  if (p?.l1State === 'needs_fixing') return FIX_STATIONS[0];
-  if (p?.l2State === 'needs_fixing') return FIX_STATIONS[1];
-  if (p?.l3State === 'needs_fixing') return FIX_STATIONS[2];
-  if (p?.strengthenState === 'needs_fixing') return FIX_STATIONS[3];
-  return FIX_STATIONS[0]; // fallback — start from Level 1
-}
-
 function TodaysFixReport() {
   const router = useRouter();
   const [items, setItems] = useState<ApiTodayItem[] | null>(null);
@@ -636,7 +687,7 @@ function TodaysFixReport() {
   }, []);
 
   function start(item: ApiTodayItem) {
-    const st = flaggedStation(item);
+    const st = failedStation(item.progress);
     router.push(assessmentHref('/sharpen', {
       conceptId: item.id,
       level: st.level,
@@ -649,7 +700,7 @@ function TodaysFixReport() {
       <LeftRail />
       <main className="flex-1 overflow-y-auto flex items-start justify-center py-10">
         <div className="w-full max-w-xl px-6">
-          <div className="mb-1 text-xs font-bold tracking-widest" style={{ color: COLORS.weak }}>🔧 TODAY'S FIX</div>
+          <div className="mb-1 text-xs font-bold tracking-widest" style={{ color: COLORS.weak }}>🔧 TODAY&apos;S FIX</div>
           <h1 className="text-3xl font-extrabold" style={{ color: '#1c1917' }}>
             {items === null ? 'Loading your fixes…'
               : items.length === 0 ? 'Nothing to fix right now 🎉'
@@ -664,7 +715,7 @@ function TodaysFixReport() {
           {items && items.length > 0 && (
             <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(0,0,0,0.08)' }}>
               {items.map((item, i) => {
-                const st = flaggedStation(item);
+                const st = failedStation(item.progress);
                 const subj = subjectDisplay(item.subjectKey.startsWith('english') ? 'english' : item.subjectKey);
                 return (
                   <button

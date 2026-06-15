@@ -1,16 +1,17 @@
 /**
  * BrainMaps API client
  *
- * All calls go to the Go backend on Fly.io (or NEXT_PUBLIC_API_URL if set).
- * Only Tapestry of the Past (soc_chB) concepts are live; all other chapters
- * still use the static dummy data in src/data/dummy.ts.
+ * Browser calls use the same-origin Next.js proxy by default, avoiding a
+ * cross-origin dependency on the Go backend's CORS configuration.
+ * The live curriculum is served by the Go API. A small local dataset remains
+ * available only for legacy demo concepts.
  */
 
 import type { Concept, Question, QuestionLevel } from '@/types';
-import { getProfile } from '@/lib/storage';
+import { getProfile, getAuthToken } from '@/lib/storage';
 
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? 'https://brainmaps-api.fly.dev/api/v1';
+  process.env.NEXT_PUBLIC_API_URL ?? '/api/v1';
 
 function studentId(): string {
   const id = getProfile()?.id;
@@ -18,7 +19,14 @@ function studentId(): string {
   return id;
 }
 
-// Concept IDs that live in the real backend (soc_chB — Tapestry of the Past)
+/** Returns auth headers for protected API calls. */
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
+// Legacy helper retained for old demo components.
 export const LIVE_CONCEPT_IDS = new Set([
   's201', 's202', 's203', 's204', 's205', 's206', 's207',
 ]);
@@ -27,22 +35,86 @@ export function isLiveConcept(conceptId: string): boolean {
   return LIVE_CONCEPT_IDS.has(conceptId);
 }
 
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+export interface AuthResponse {
+  token: string;
+  householdId: string;
+  displayName: string;
+}
+
+export interface ApiHouseholdStudent {
+  id: string;
+  name: string;
+  grade: number;
+  board: 'CBSE' | 'ICSE';
+}
+
+export async function registerHousehold(
+  email: string,
+  displayName: string,
+  password: string,
+): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, displayName, password }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function loginHousehold(
+  email: string,
+  password: string,
+): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function logoutHousehold(): Promise<void> {
+  await fetch(`${API_BASE}/auth/logout`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+}
+
+export async function getHouseholdStudents(): Promise<ApiHouseholdStudent[]> {
+  const res = await fetch(`${API_BASE}/households/me/students`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  return data.students ?? [];
+}
+
+export async function addStudentToHousehold(
+  name: string,
+  grade: number,
+  board: 'CBSE' | 'ICSE',
+): Promise<ApiHouseholdStudent> {
+  const res = await fetch(`${API_BASE}/households/me/students`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ name, grade, board }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ─── Legacy shape (kept for type compatibility) ───────────────────────────────
+
 export interface ApiStudent {
   id: string;
   name: string;
   grade: number;
   board: 'CBSE' | 'ICSE';
   createdAt: string;
-}
-
-export async function loginStudent(name: string): Promise<ApiStudent> {
-  const res = await fetch(`${API_BASE}/students/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
 }
 
 // ─── Backend response shapes ──────────────────────────────────────────────────
@@ -85,7 +157,6 @@ interface ApiConcept {
 interface ApiOption {
   key: string;
   text: string;
-  isCorrect: boolean;
 }
 
 interface ApiQuestion {
@@ -94,9 +165,6 @@ interface ApiQuestion {
   type: string;
   level: string;
   text: string;
-  explanation?: string;
-  rubricHint?: string;
-  keyConcepts?: string[];
   options?: ApiOption[];
 }
 
@@ -132,13 +200,9 @@ function mapQuestion(q: ApiQuestion): Question {
     type: q.type as Question['type'],
     text: q.text,
     level: q.level as QuestionLevel,
-    explanation: q.explanation,
-    rubricHint: q.rubricHint,
-    keyConcepts: q.keyConcepts,
     options: q.options?.map(o => ({
       id: o.key,
       text: o.text,
-      correct: o.isCorrect,
     })),
   };
 }
@@ -159,14 +223,17 @@ export interface ApiConceptDetail {
 
 export async function fetchConcept(conceptId: string): Promise<ApiConceptDetail> {
   const res = await fetch(
-    `${API_BASE}/concepts/${conceptId}?student=${studentId()}`
+    `${API_BASE}/concepts/${conceptId}?student=${studentId()}`,
+    { headers: authHeaders() },
   );
   if (!res.ok) throw new Error(`fetchConcept ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
 export async function fetchChapters(subjectKey: string): Promise<ApiChapter[]> {
-  const res = await fetch(`${API_BASE}/chapters?subject=${subjectKey}`);
+  const res = await fetch(`${API_BASE}/chapters?subject=${subjectKey}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`fetchChapters ${res.status}: ${await res.text()}`);
   return res.json();
 }
@@ -186,7 +253,10 @@ export interface ApiDashboard {
 }
 
 export async function fetchDashboard(): Promise<ApiDashboard> {
-  const res = await fetch(`${API_BASE}/dashboard?student=${studentId()}`, { cache: 'no-store' });
+  const res = await fetch(`${API_BASE}/dashboard?student=${studentId()}`, {
+    cache: 'no-store',
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`fetchDashboard ${res.status}: ${await res.text()}`);
   return res.json();
 }
@@ -213,7 +283,10 @@ export interface ApiToday {
 }
 
 export async function fetchToday(): Promise<ApiToday> {
-  const res = await fetch(`${API_BASE}/today?student=${studentId()}`, { cache: 'no-store' });
+  const res = await fetch(`${API_BASE}/today?student=${studentId()}`, {
+    cache: 'no-store',
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`fetchToday ${res.status}: ${await res.text()}`);
   const d = await res.json();
   // The API returns null (not []) for empty queues — coerce so callers can
@@ -228,7 +301,7 @@ export async function fetchToday(): Promise<ApiToday> {
 export async function fetchConcepts(chapterId: string): Promise<Concept[]> {
   const res = await fetch(
     `${API_BASE}/concepts?chapter=${chapterId}&student=${studentId()}`,
-    { next: { revalidate: 0 } } // always fresh
+    { next: { revalidate: 0 }, headers: authHeaders() } // always fresh
   );
   if (!res.ok) throw new Error(`fetchConcepts ${res.status}: ${await res.text()}`);
   const data: ApiConcept[] = await res.json();
@@ -244,7 +317,9 @@ export async function fetchQuestions(
   // (a level the student previously failed) — targeting their weak concepts.
   const params = new URLSearchParams({ level, student: studentId() });
   excludeQuestionIds.forEach(id => params.append('exclude', id));
-  const res = await fetch(`${API_BASE}/concepts/${conceptId}/questions?${params}`);
+  const res = await fetch(`${API_BASE}/concepts/${conceptId}/questions?${params}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`fetchQuestions ${res.status}: ${await res.text()}`);
   const data: ApiQuestion[] = await res.json();
   return data.map(mapQuestion);
@@ -257,12 +332,31 @@ export interface SubmitAnswer {
   studentText?: string;
 }
 
-export interface AnswerFeedback {
-  questionType: string;   // MCQ | DESCRIPTIVE | FEYNMAN | BLURT | ACTIVE_RECALL
+export interface ActiveSession {
+  sessionId: string;
+  sessionToken: string;
+}
+
+export interface SessionReviewAnswer {
+  questionId: string;
+  questionType: string;
   questionText: string;
-  studentAnswer: string;  // what the student actually wrote / chose
-  feedback: string;       // AI analysis — 3 sentences covering right, wrong, improve
-  score: number;          // 0 = wrong MCQ; 0–1 for open answers
+  studentAnswer: string;
+  isCorrect?: boolean;
+  score?: number;
+  feedback?: string;
+  correctAnswer?: string;
+  explanation?: string;
+  answerGuide?: string;
+}
+
+export interface SessionReview {
+  sessionId: string;
+  conceptId: string;
+  conceptName: string;
+  station: QuestionLevel;
+  score: number;
+  answers: SessionReviewAnswer[];
 }
 
 export interface SessionResult {
@@ -270,39 +364,52 @@ export interface SessionResult {
   score: number;                  // 0–1 (MCQ-only until AI grading finishes)
   passed: boolean;
   newState: string;
-  aiGrading: boolean;             // true = Gemini still working in background
-  feedback: AnswerFeedback[];     // per-answer commentary; grows as AI finishes
+  aiGrading: boolean;
+  reviewAvailable: boolean;
 }
 
 export async function startSession(
   conceptId: string,
   station: QuestionLevel
-): Promise<string> {
+): Promise<ActiveSession> {
   const res = await fetch(`${API_BASE}/sessions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ studentId: studentId(), conceptId, station }),
   });
   if (!res.ok) throw new Error(`startSession ${res.status}`);
-  const { sessionId } = await res.json();
-  return sessionId;
+  return res.json();
 }
 
 export async function completeSession(
-  sessionId: string,
+  session: ActiveSession,
   answers: SubmitAnswer[]
 ): Promise<SessionResult> {
-  const res = await fetch(`${API_BASE}/sessions/${sessionId}/complete`, {
+  const res = await fetch(`${API_BASE}/sessions/${session.sessionId}/complete`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Session-Token': session.sessionToken,
+      ...authHeaders(),
+    },
     body: JSON.stringify({ answers }),
   });
   if (!res.ok) throw new Error(`completeSession ${res.status}`);
   return res.json();
 }
 
-export async function getSession(sessionId: string): Promise<SessionResult> {
-  const res = await fetch(`${API_BASE}/sessions/${sessionId}`);
+export async function getSession(session: ActiveSession): Promise<SessionResult> {
+  const res = await fetch(`${API_BASE}/sessions/${session.sessionId}`, {
+    headers: { 'X-Session-Token': session.sessionToken, ...authHeaders() },
+  });
   if (!res.ok) throw new Error(`getSession ${res.status}`);
+  return res.json();
+}
+
+export async function getSessionReview(session: ActiveSession): Promise<SessionReview> {
+  const res = await fetch(`${API_BASE}/sessions/${session.sessionId}/review`, {
+    headers: { 'X-Session-Token': session.sessionToken, ...authHeaders() },
+  });
+  if (!res.ok) throw new Error(`getSessionReview ${res.status}`);
   return res.json();
 }

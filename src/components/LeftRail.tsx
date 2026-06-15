@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { fetchToday, fetchDashboard } from '@/lib/api';
-import { clearProfile, getProfile } from '@/lib/storage';
+import { clearProfile, useProfile } from '@/lib/storage';
 
 interface LeftRailProps {
   studentName?: string;
@@ -34,8 +34,7 @@ export function LeftRail({
 }: LeftRailProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const [profile, setProfile] = useState<ReturnType<typeof getProfile>>(null);
-  useEffect(() => setProfile(getProfile()), []);
+  const profile = useProfile();
   const displayName = studentName ?? profile?.name ?? 'Student';
   const displayClass = studentClass ?? profile?.class ?? 6;
   const displayBoard = board ?? profile?.board ?? 'CBSE';
@@ -141,7 +140,7 @@ export function LeftRail({
           boxShadow: '0 4px 16px rgba(0,0,0,0.04)',
         }}
       >
-        <div className="text-xs font-bold mb-3" style={{ color: '#78716c' }}>Today's plan</div>
+        <div className="text-xs font-bold mb-3" style={{ color: '#78716c' }}>Today&apos;s plan</div>
 
         <div className="flex items-center gap-2.5 mb-2">
           <div

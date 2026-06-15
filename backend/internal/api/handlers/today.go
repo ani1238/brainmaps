@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	authmw "github.com/ani1238/brainmaps-api/internal/api/middleware"
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/models"
 )
@@ -15,6 +16,10 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 	studentID := r.URL.Query().Get("student")
 	if studentID == "" {
 		http.Error(w, "student is required", http.StatusBadRequest)
+		return
+	}
+	if !authmw.AuthorizeStudent(r, studentID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 

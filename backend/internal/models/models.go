@@ -25,11 +25,11 @@ const (
 type QuestionLevel string
 
 const (
-	Level1    QuestionLevel = "level1"
-	Level2    QuestionLevel = "level2"
-	Level3    QuestionLevel = "level3"
+	Level1     QuestionLevel = "level1"
+	Level2     QuestionLevel = "level2"
+	Level3     QuestionLevel = "level3"
 	Strengthen QuestionLevel = "strengthen"
-	Revise    QuestionLevel = "revise"
+	Revise     QuestionLevel = "revise"
 )
 
 type Question struct {
@@ -38,16 +38,32 @@ type Question struct {
 	Type        QuestionType  `json:"type"`
 	Level       QuestionLevel `json:"level"`
 	Text        string        `json:"text"`
-	Explanation *string       `json:"explanation,omitempty"`
-	RubricHint  *string       `json:"rubricHint,omitempty"`
-	KeyConcepts []string      `json:"keyConcepts,omitempty"`
+	Explanation *string       `json:"-"`
+	RubricHint  *string       `json:"-"`
+	KeyConcepts []string      `json:"-"`
 	Options     []MCQOption   `json:"options,omitempty"`
 }
 
 type MCQOption struct {
 	Key       string `json:"key"`
 	Text      string `json:"text"`
-	IsCorrect bool   `json:"isCorrect"`
+	IsCorrect bool   `json:"-"`
+}
+
+// ActiveQuestion is safe to send before a session is completed. Answer keys,
+// explanations, rubrics, and grading tags remain server-side.
+type ActiveQuestion struct {
+	ID        string            `json:"id"`
+	ConceptID string            `json:"conceptId"`
+	Type      QuestionType      `json:"type"`
+	Level     QuestionLevel     `json:"level"`
+	Text      string            `json:"text"`
+	Options   []ActiveMCQOption `json:"options,omitempty"`
+}
+
+type ActiveMCQOption struct {
+	Key  string `json:"key"`
+	Text string `json:"text"`
 }
 
 // ── Student ───────────────────────────────────────────────────────────────────
@@ -65,12 +81,12 @@ type Student struct {
 type MasteryState string
 
 const (
-	NotStarted  MasteryState = "NOT_STARTED"
-	VeryWeak    MasteryState = "VERY_WEAK"
-	Weak        MasteryState = "WEAK"
-	Developing  MasteryState = "DEVELOPING"
-	Strong      MasteryState = "STRONG"
-	RecallDue   MasteryState = "RECALL_DUE"
+	NotStarted MasteryState = "NOT_STARTED"
+	VeryWeak   MasteryState = "VERY_WEAK"
+	Weak       MasteryState = "WEAK"
+	Developing MasteryState = "DEVELOPING"
+	Strong     MasteryState = "STRONG"
+	RecallDue  MasteryState = "RECALL_DUE"
 )
 
 // StationState is the per-station progress value stored in concept_progress.
@@ -99,10 +115,10 @@ type ConceptProgress struct {
 }
 
 type ReviseSchedule struct {
-	StudentID    string    `json:"studentId"`
-	ConceptID    string    `json:"conceptId"`
-	IntervalDays int       `json:"intervalDays"`
-	NextDueAt    time.Time `json:"nextDueAt"`
+	StudentID    string     `json:"studentId"`
+	ConceptID    string     `json:"conceptId"`
+	IntervalDays int        `json:"intervalDays"`
+	NextDueAt    time.Time  `json:"nextDueAt"`
 	LastDoneAt   *time.Time `json:"lastDoneAt,omitempty"`
 }
 
@@ -111,11 +127,11 @@ type ReviseSchedule struct {
 type StationKey string
 
 const (
-	StationLevel1    StationKey = "level1"
-	StationLevel2    StationKey = "level2"
-	StationLevel3    StationKey = "level3"
+	StationLevel1     StationKey = "level1"
+	StationLevel2     StationKey = "level2"
+	StationLevel3     StationKey = "level3"
 	StationStrengthen StationKey = "strengthen"
-	StationRevise    StationKey = "revise"
+	StationRevise     StationKey = "revise"
 )
 
 type Session struct {
@@ -152,6 +168,11 @@ type StartSessionReq struct {
 	Station   StationKey `json:"station"`
 }
 
+type StartSessionResp struct {
+	SessionID    string `json:"sessionId"`
+	SessionToken string `json:"sessionToken"`
+}
+
 type SubmitAnswerReq struct {
 	QuestionID   string       `json:"questionId"`
 	QuestionType QuestionType `json:"questionType"`
@@ -163,23 +184,35 @@ type CompleteSessionReq struct {
 	Answers []SubmitAnswerReq `json:"answers"`
 }
 
-// AnswerFeedback is one item in the post-session review panel.
-// For wrong MCQs: what the student picked + the explanation. For open answers: the Gemini analysis.
-type AnswerFeedback struct {
-	QuestionType  string  `json:"questionType"`  // MCQ | DESCRIPTIVE | FEYNMAN | BLURT | ACTIVE_RECALL
-	QuestionText  string  `json:"questionText"`
-	StudentAnswer string  `json:"studentAnswer"` // what the student actually wrote / chose
-	Feedback      string  `json:"feedback"`      // AI analysis + improvement tip (3 sentences)
-	Score         float64 `json:"score"`         // 0=wrong MCQ, 0–1 for open answers
+type CompleteSessionResp struct {
+	SessionID       string       `json:"sessionId"`
+	Score           float64      `json:"score"`  // immediate MCQ-only score; updates after AI grading
+	Passed          bool         `json:"passed"` // score >= 0.80 AND station cleared (tag gate can demote, never promote)
+	NewState        MasteryState `json:"newState"`
+	AIGrading       bool         `json:"aiGrading"`       // true = an AI provider is still working
+	ReviewAvailable bool         `json:"reviewAvailable"` // true once grading is final
 }
 
-type CompleteSessionResp struct {
-	SessionID  string           `json:"sessionId"`
-	Score      float64          `json:"score"`     // immediate MCQ-only score; updates after AI grading
-	Passed     bool             `json:"passed"`    // score >= 0.80 AND station cleared (tag gate can demote, never promote)
-	NewState   MasteryState     `json:"newState"`
-	AIGrading  bool             `json:"aiGrading"` // true = Gemini still working
-	Feedback   []AnswerFeedback `json:"feedback"`  // available per-answer commentary
+type SessionReview struct {
+	SessionID   string                `json:"sessionId"`
+	ConceptID   string                `json:"conceptId"`
+	ConceptName string                `json:"conceptName"`
+	Station     StationKey            `json:"station"`
+	Score       float64               `json:"score"`
+	Answers     []SessionReviewAnswer `json:"answers"`
+}
+
+type SessionReviewAnswer struct {
+	QuestionID    string       `json:"questionId"`
+	QuestionType  QuestionType `json:"questionType"`
+	QuestionText  string       `json:"questionText"`
+	StudentAnswer string       `json:"studentAnswer"`
+	IsCorrect     *bool        `json:"isCorrect,omitempty"`
+	Score         *float64     `json:"score,omitempty"`
+	Feedback      string       `json:"feedback,omitempty"`
+	CorrectAnswer string       `json:"correctAnswer,omitempty"`
+	Explanation   string       `json:"explanation,omitempty"`
+	AnswerGuide   string       `json:"answerGuide,omitempty"`
 }
 
 // ConceptWithProgress is returned by the Brain Map endpoint

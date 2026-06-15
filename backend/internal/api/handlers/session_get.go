@@ -16,20 +16,25 @@ import (
 // The frontend polls this after CompleteSession when aiGrading=true.
 func GetSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
+	tokenHash, ok := requestSessionTokenHash(r)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
 
 	var studentID, conceptID string
 	var score *float64
 
 	err := db.Pool.QueryRow(r.Context(), `
 		SELECT student_id, concept_id, score
-		FROM sessions WHERE id = $1
-	`, sessionID).Scan(&studentID, &conceptID, &score)
+		FROM sessions WHERE id = $1 AND access_token_hash = $2
+	`, sessionID, tokenHash).Scan(&studentID, &conceptID, &score)
 	if err != nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 
-	// Count open answers that Gemini hasn't graded yet. This MUST match the
+	// Count open answers that an AI provider hasn't graded yet. This MUST match the
 	// grader's filter (grade.GradeOpenAnswers) — every non-MCQ answer with text
 	// — or polling stops early for the newer types (GENERATIVE_PRODUCTION, etc.)
 	// and the results screen freezes on the provisional MCQ-only score.
@@ -62,17 +67,14 @@ func GetSession(w http.ResponseWriter, r *http.Request) {
 		passed = passed && stationCleared(r.Context(), sessionID)
 	}
 
-	// Build per-answer feedback (wrong MCQs + any Gemini-graded open answers so far)
-	feedback := buildFeedback(r.Context(), sessionID)
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(models.CompleteSessionResp{
-		SessionID: sessionID,
-		Score:     currentScore,
-		Passed:    passed,
-		NewState:  state,
-		AIGrading: ungradedCount > 0,
-		Feedback:  feedback,
+		SessionID:       sessionID,
+		Score:           currentScore,
+		Passed:          passed,
+		NewState:        state,
+		AIGrading:       ungradedCount > 0,
+		ReviewAvailable: ungradedCount == 0,
 	})
 }
 

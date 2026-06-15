@@ -1,6 +1,6 @@
 # fly.toml — BrainMaps Go API
 # Deploy: fly deploy  (from the backend/ directory)
-# Secrets: fly secrets set DATABASE_URL=... GEMINI_API_KEY=...
+# Secrets: fly secrets set DATABASE_URL=... GROQ_API_KEY=... GEMINI_API_KEY=... OPENAI_API_KEY=...
 
 app = "brainmaps-api"
 primary_region = "sin"   # Singapore — same region as Neon ap-southeast-1
@@ -10,6 +10,7 @@ primary_region = "sin"   # Singapore — same region as Neon ap-southeast-1
 
 [env]
   PORT = "8080"
+  ALLOWED_ORIGINS = "https://brainmaps.in,https://www.brainmaps.in,https://brainmaps-dun.vercel.app,https://brainmaps-ani1238s-projects.vercel.app,https://brainmaps-ani1238-ani1238s-projects.vercel.app"
 
 [http_service]
   internal_port       = 8080

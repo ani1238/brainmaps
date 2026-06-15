@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	authmw "github.com/ani1238/brainmaps-api/internal/api/middleware"
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/models"
 	"github.com/go-chi/chi/v5"
@@ -30,6 +31,10 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 	studentID := r.URL.Query().Get("student")
 	if chapterID == "" || studentID == "" {
 		http.Error(w, "chapter and student are required", http.StatusBadRequest)
+		return
+	}
+	if !authmw.AuthorizeStudent(r, studentID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -134,6 +139,10 @@ type ConceptDetailResp struct {
 func GetConcept(w http.ResponseWriter, r *http.Request) {
 	conceptID := chi.URLParam(r, "id")
 	studentID := r.URL.Query().Get("student")
+	if studentID != "" && !authmw.AuthorizeStudent(r, studentID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 
 	var (
 		resp                      ConceptDetailResp
@@ -225,6 +234,10 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "level is required", http.StatusBadRequest)
 		return
 	}
+	if student := r.URL.Query().Get("student"); student != "" && !authmw.AuthorizeStudent(r, student) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 
 	rows, err := db.Pool.Query(r.Context(), `
 		SELECT q.id, q.type, q.level, q.text, q.explanation, q.rubric_hint, q.key_concepts,
@@ -291,7 +304,28 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(selected)
+	json.NewEncoder(w).Encode(activeQuestions(selected))
+}
+
+func activeQuestions(questions []models.Question) []models.ActiveQuestion {
+	result := make([]models.ActiveQuestion, 0, len(questions))
+	for _, question := range questions {
+		active := models.ActiveQuestion{
+			ID:        question.ID,
+			ConceptID: question.ConceptID,
+			Type:      question.Type,
+			Level:     question.Level,
+			Text:      question.Text,
+		}
+		for _, option := range question.Options {
+			active.Options = append(active.Options, models.ActiveMCQOption{
+				Key:  option.Key,
+				Text: option.Text,
+			})
+		}
+		result = append(result, active)
+	}
+	return result
 }
 
 // scanQuestionRows assembles Question models (with their MCQ options) from a

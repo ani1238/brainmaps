@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import type { Question } from '@/types';
 
 export interface AnswerPayload {
@@ -22,6 +22,7 @@ interface QuestionScreenProps {
   onSkip?: () => void;
   onAnswer?: (correct: boolean) => void;
   onSubmitAnswer?: (payload: AnswerPayload) => void;
+  deferAnswerFeedback?: boolean;
 }
 
 export function QuestionScreen({
@@ -36,6 +37,7 @@ export function QuestionScreen({
   onSkip,
   onAnswer,
   onSubmitAnswer,
+  deferAnswerFeedback = false,
 }: QuestionScreenProps) {
   return (
     <div className="h-full flex flex-col" style={{ background: 'rgba(255,255,255,0.96)' }}>
@@ -60,21 +62,22 @@ export function QuestionScreen({
           // MCQ, but also Spot it / Context clue. Render + grade by option.
           const hasOptions = (question.options?.length ?? 0) > 0;
           if (hasOptions) {
-            return <MCQQuestion question={question} onNext={onNext} onAnswer={onAnswer}
+            return <MCQQuestion key={question.id} question={question} onNext={onNext} onAnswer={onAnswer}
+              deferAnswerFeedback={deferAnswerFeedback}
               onSubmitAnswer={onSubmitAnswer} />;
           }
           switch (question.type) {
             case 'DESCRIPTIVE':
-              return <DescriptiveQuestion question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
+              return <DescriptiveQuestion key={question.id} question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
             case 'FEYNMAN':
-              return <FeynmanQuestion question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
+              return <FeynmanQuestion key={question.id} question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
             case 'BLURT':
-              return <BlurtQuestion question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
+              return <BlurtQuestion key={question.id} question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
             case 'ACTIVE_RECALL':
-              return <ActiveRecallQuestion question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
+              return <ActiveRecallQuestion key={question.id} question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
             default:
               // Free-text open types (Fix it, Produce it, …) — graded by Gemini.
-              return <GenericTextQuestion question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
+              return <GenericTextQuestion key={question.id} question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
           }
         })()}
       </div>
@@ -141,10 +144,11 @@ function TierBadge({ tier }: { tier: 'VERY_WEAK' | 'WEAK' | 'DEVELOPING' }) {
 
 // ── MCQ Question ──────────────────────────────────────────────────────────
 
-function MCQQuestion({ question, onNext, onAnswer, onSubmitAnswer }: {
+function MCQQuestion({ question, onNext, onAnswer, onSubmitAnswer, deferAnswerFeedback = false }: {
   question: Question; onNext: () => void;
   onAnswer?: (correct: boolean) => void;
   onSubmitAnswer?: (p: AnswerPayload) => void;
+  deferAnswerFeedback?: boolean;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
@@ -153,8 +157,10 @@ function MCQQuestion({ question, onNext, onAnswer, onSubmitAnswer }: {
     if (revealed) return;
     setSelected(id);
     setRevealed(true);
-    const correctId = question.options?.find(o => o.correct)?.id;
-    onAnswer?.(id === correctId);
+    if (!deferAnswerFeedback) {
+      const correctId = question.options?.find(o => o.correct)?.id;
+      onAnswer?.(id === correctId);
+    }
     onSubmitAnswer?.({ questionId: question.id, questionType: 'MCQ', chosenOption: id });
   }
 
@@ -184,8 +190,8 @@ function MCQQuestion({ question, onNext, onAnswer, onSubmitAnswer }: {
       <div className="flex flex-col gap-2.5">
         {options.map(o => {
           const isSelected = selected === o.id;
-          const isCorrect = revealed && o.correct;
-          const isWrong = revealed && isSelected && !o.correct;
+          const isCorrect = !deferAnswerFeedback && revealed && o.correct;
+          const isWrong = !deferAnswerFeedback && revealed && isSelected && !o.correct;
 
           return (
             <button
@@ -215,7 +221,16 @@ function MCQQuestion({ question, onNext, onAnswer, onSubmitAnswer }: {
         })}
       </div>
 
-      {revealed && question.explanation && (
+      {deferAnswerFeedback && revealed && (
+        <div
+          className="p-4 rounded-xl text-sm"
+          style={{ background: 'rgba(79,70,229,0.06)', border: '1px solid rgba(79,70,229,0.2)', color: '#44403c' }}
+        >
+          Answer saved. You can check it in Review answers after the session.
+        </div>
+      )}
+
+      {!deferAnswerFeedback && revealed && question.explanation && (
         <div
           className="p-4 rounded-xl"
           style={{ background: 'rgba(79,70,229,0.06)', border: '1px solid rgba(79,70,229,0.2)' }}
@@ -562,7 +577,7 @@ function BlurtQuestion({ question, onNext, onSubmitAnswer }: {
         className="py-3 rounded-xl font-bold text-sm text-white transition-all hover:opacity-90 active:scale-[0.98]"
         style={{ background: '#4F46E5' }}
       >
-        I'm done
+        I&apos;m done
       </button>
     </div>
   );
@@ -623,7 +638,7 @@ function ActiveRecallQuestion({ question, onNext, onSubmitAnswer }: {
       />
 
       <div className="text-xs text-center" style={{ color: '#78716c' }}>
-        Get this right and you won't see it again for 3 weeks ✨
+        Get this right and you won&apos;t see it again for 3 weeks ✨
       </div>
 
       <button

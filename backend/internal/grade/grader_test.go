@@ -3,6 +3,8 @@ package grade
 import (
 	"reflect"
 	"testing"
+
+	"github.com/ani1238/brainmaps-api/internal/models"
 )
 
 func TestTagStatPassed(t *testing.T) {
@@ -122,4 +124,39 @@ func TestNextRecallInterval(t *testing.T) {
 			t.Errorf("nextRecallInterval(%d, %t) = %d, want %d", tt.current, tt.passed, got, tt.want)
 		}
 	}
+}
+
+func TestNextStationKey(t *testing.T) {
+	tests := []struct {
+		station models.StationKey
+		want    models.StationKey
+	}{
+		{models.StationLevel1, models.StationLevel2},
+		{models.StationLevel2, models.StationLevel3},
+		{models.StationLevel3, models.StationStrengthen},
+		{models.StationStrengthen, ""},
+		{models.StationRevise, ""},
+	}
+
+	for _, tt := range tests {
+		if got := nextStationKey(tt.station); got != tt.want {
+			t.Fatalf("nextStationKey(%q) = %q, want %q", tt.station, got, tt.want)
+		}
+	}
+}
+
+func TestConfiguredModel(t *testing.T) {
+	t.Run("uses stable default", func(t *testing.T) {
+		t.Setenv("TEST_MODEL", "")
+		if got := configuredModel("TEST_MODEL", "stable-model"); got != "stable-model" {
+			t.Fatalf("configuredModel() = %q, want stable-model", got)
+		}
+	})
+
+	t.Run("uses trimmed override", func(t *testing.T) {
+		t.Setenv("TEST_MODEL", "  replacement-model  ")
+		if got := configuredModel("TEST_MODEL", "stable-model"); got != "replacement-model" {
+			t.Fatalf("configuredModel() = %q, want replacement-model", got)
+		}
+	})
 }

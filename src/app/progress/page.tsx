@@ -6,7 +6,6 @@ import { GridBackground } from '@/components/GridBackground';
 import { LeftRail } from '@/components/LeftRail';
 import { COLORS, SUBJECT_MAP } from '@/lib/tokens';
 import { fetchDashboard, type ApiDashboard } from '@/lib/api';
-import { assessmentHref } from '@/lib/navigation';
 
 function heatColor(n: number) {
   if (n === 0) return '#ece5d3';
@@ -39,7 +38,7 @@ export default function ProgressPage() {
       <main className="relative flex-1 overflow-y-auto px-8 py-6 flex flex-col gap-5">
         <div>
           <h1 className="text-3xl font-extrabold" style={{ color: '#1c1917' }}>My Progress 📈</h1>
-          <p className="text-sm mt-1" style={{ color: '#78716c' }}>Everything you've been building, in one place.</p>
+          <p className="text-sm mt-1" style={{ color: '#78716c' }}>Everything you&apos;ve been building, in one place.</p>
         </div>
 
         {/* ── Streak card ── */}
@@ -134,7 +133,7 @@ export default function ProgressPage() {
                 {dash!.needsAttention.map(c => (
                   <Link
                     key={c.conceptId}
-                    href={assessmentHref('/sharpen', { conceptId: c.conceptId, level: 'level1' }, '/progress')}
+                    href={`/brain-map?conceptId=${encodeURIComponent(c.conceptId)}`}
                     className="flex flex-col hover:opacity-80"
                   >
                     <span className="text-sm font-semibold truncate" style={{ color: '#1c1917' }}>{c.name}</span>

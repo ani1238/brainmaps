@@ -1,4 +1,4 @@
-import type { StationKey, MasteryState, SubjectKey } from '@/types';
+import type { StationKey, MasteryState } from '@/types';
 
 // Re-export so old components that import MasteryState from here still compile
 export type { MasteryState };

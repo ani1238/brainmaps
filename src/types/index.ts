@@ -15,7 +15,7 @@ export type QuestionType =
 export interface MCQOption {
   id: string;
   text: string;
-  correct: boolean;
+  correct?: boolean;
 }
 
 // Which station a question belongs to. Levels 1–3 each hold a MIX of

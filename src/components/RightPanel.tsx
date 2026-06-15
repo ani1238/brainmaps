@@ -62,7 +62,6 @@ function deriveStations(concept: Concept): Record<StationKey, StationStatus> {
 
   // ── Fallback: infer from mastery state (dummy data) ──────────────────────
   const score = concept.score ?? 0;
-  const isStrong = concept.state === 'STRONG' || concept.state === 'RECALL_DUE';
   switch (concept.state) {
     case 'NOT_STARTED':
       return { learn_it: 'current',     get_it: 'locked',     master_it: 'locked', strengthen: 'locked', keep_it_fresh: 'locked' };
@@ -170,7 +169,6 @@ export function RightPanel({
         setTabQuestions(result);
       })
       .finally(() => setLoadingQ(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [concept.id, activeTab]);
 
   function startStation(key: StationKey) {

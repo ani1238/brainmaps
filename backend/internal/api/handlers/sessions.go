@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	authmw "github.com/ani1238/brainmaps-api/internal/api/middleware"
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/grade"
 	"github.com/ani1238/brainmaps-api/internal/models"
@@ -18,13 +19,23 @@ func StartSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	if !authmw.AuthorizeStudent(r, req.StudentID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	token, tokenHash, err := newSessionToken()
+	if err != nil {
+		http.Error(w, "could not secure session", http.StatusInternalServerError)
+		return
+	}
 
 	var sessionID string
-	err := db.Pool.QueryRow(r.Context(), `
-		INSERT INTO sessions (student_id, concept_id, station)
-		VALUES ($1, $2, $3)
+	err = db.Pool.QueryRow(r.Context(), `
+		INSERT INTO sessions (student_id, concept_id, station, access_token_hash)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id
-	`, req.StudentID, req.ConceptID, req.Station).Scan(&sessionID)
+	`, req.StudentID, req.ConceptID, req.Station, tokenHash).Scan(&sessionID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -32,13 +43,21 @@ func StartSession(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"sessionId": sessionID})
+	json.NewEncoder(w).Encode(models.StartSessionResp{
+		SessionID:    sessionID,
+		SessionToken: token,
+	})
 }
 
 // POST /sessions/{id}/complete
-// Saves all answers, gives instant MCQ feedback, fires async AI grading.
+// Saves all answers, grades MCQs server-side, and fires async AI grading.
 func CompleteSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
+	tokenHash, ok := requestSessionTokenHash(r)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
 
 	var req models.CompleteSessionReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -49,8 +68,10 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 	// Verify session exists
 	var studentID, conceptID string
 	err := db.Pool.QueryRow(r.Context(), `
-		SELECT student_id, concept_id FROM sessions WHERE id = $1 AND completed_at IS NULL
-	`, sessionID).Scan(&studentID, &conceptID)
+		SELECT student_id, concept_id
+		FROM sessions
+		WHERE id = $1 AND access_token_hash = $2 AND completed_at IS NULL
+	`, sessionID, tokenHash).Scan(&studentID, &conceptID)
 	if err != nil {
 		http.Error(w, "session not found or already completed", http.StatusNotFound)
 		return
@@ -126,17 +147,13 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 		SELECT state FROM concept_progress WHERE student_id = $1 AND concept_id = $2
 	`, studentID, conceptID).Scan(&state)
 
-	// Include whatever feedback is available right now (MCQ wrong answers + explanations).
-	// Open-answer feedback is added once Gemini finishes — the client polls GetSession for that.
-	feedback := buildFeedback(r.Context(), sessionID)
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(models.CompleteSessionResp{
-		SessionID: sessionID,
-		Score:     mcqScore,
-		Passed:    passed,
-		NewState:  state,
-		AIGrading: hasOpenAnswers,
-		Feedback:  feedback,
+		SessionID:       sessionID,
+		Score:           mcqScore,
+		Passed:          passed,
+		NewState:        state,
+		AIGrading:       hasOpenAnswers,
+		ReviewAvailable: !hasOpenAnswers,
 	})
 }
