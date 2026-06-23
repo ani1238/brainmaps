@@ -90,7 +90,7 @@ export default function DashboardPage() {
               <p className="text-sm mt-1.5" style={{ color: '#44403c' }}>
                 <strong style={{ color: COLORS.strong }}>{m?.strong ?? 0} got it! 🎉</strong>
                 {' · '}
-                <strong style={{ color: COLORS.weak }}>{toFix} to fix ✨</strong>
+                <strong style={{ color: COLORS.weak }}>{toFix} to work on ✨</strong>
                 {' · '}
                 <span style={{ color: '#78716c' }}>{m?.notStarted ?? 0} brand new</span>
               </p>
