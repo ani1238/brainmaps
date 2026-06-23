@@ -85,11 +85,11 @@ function ReviseQueue() {
   }, {});
 
   return (
-    <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
+    <div className="relative flex flex-col lg:flex-row min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: '#F4EFE5' }}>
       <GridBackground />
       <LeftRail />
-      <main className="flex-1 overflow-y-auto flex items-start justify-center py-10">
-        <div className="w-full max-w-xl px-6">
+      <main className="flex-1 lg:overflow-y-auto flex items-start justify-center py-6 lg:py-10 pb-24 lg:pb-10">
+        <div className="w-full max-w-xl px-4 lg:px-6">
           <div className="mb-1 text-xs font-bold tracking-widest" style={{ color: COLORS.strong }}>
             🔄 REVISE
           </div>

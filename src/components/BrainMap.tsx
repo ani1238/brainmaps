@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SUBJECTS, COLORS, MASTERY_MAP, subjectDisplay, type MasteryState } from '@/lib/tokens';
 import { GridBackground } from './GridBackground';
@@ -89,10 +89,35 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       .catch(() => {});
   }, []);
 
-  const cy = height / 2 - 20;
+  // Measure the actual container so the orbit centers and scales to any screen
+  // (the component is also given sensible defaults for SSR / first paint).
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dims, setDims] = useState<{ w: number; h: number }>({ w: width, h: height });
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => setDims({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-  const panelW = showPanel ? 420 : 0;
-  const orbitCx = (width - panelW) / 2;
+  const cy = dims.h / 2 - 20;
+
+  // The concept side panel is a 420px sidebar on desktop, but a full-screen
+  // bottom sheet on mobile (so it doesn't squeeze the orbit off-screen).
+  const isNarrow = dims.w < 640;
+  const panelW = showPanel && !isNarrow ? 420 : 0;
+  const orbitCx = (dims.w - panelW) / 2;
+
+  // Scale the orbit radius so all nodes fit inside the measured container
+  // (phones are far smaller than the 1200×900 desktop design).
+  const orbitScale = Math.max(0.5, Math.min(1, Math.min(dims.w - panelW, dims.h) / 760));
+  const rSubject = 240 * orbitScale;
+  const rChapter = 260 * orbitScale;
+  const rConcept = 270 * orbitScale;
+  const rEnglish = 220 * orbitScale;
 
   function zoomToSubject(subjectKey: string, subjectLabel: string) {
     if (subjectKey === 'english') {
@@ -211,7 +236,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
   }, []);
 
   return (
-    <div className="relative w-full h-full overflow-hidden" style={{ background: 'transparent' }}>
+    <div ref={containerRef} className="relative w-full h-full overflow-hidden" style={{ background: 'transparent' }}>
       <GridBackground />
 
       {/* ambient glow blobs */}
@@ -261,10 +286,10 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
         {level === 'subject' && (
           <>
             {/* orbit rings */}
-            <circle cx={orbitCx} cy={cy} r={240} fill="none" stroke="rgba(168,162,158,0.3)" strokeWidth={1} strokeDasharray="4 6" />
+            <circle cx={orbitCx} cy={cy} r={rSubject} fill="none" stroke="rgba(168,162,158,0.3)" strokeWidth={1} strokeDasharray="4 6" />
             {/* connection lines */}
             {SUBJECTS.map((s, i) => {
-              const pos = polarPos(orbitCx, cy, 240, i, SUBJECTS.length);
+              const pos = polarPos(orbitCx, cy, rSubject, i, SUBJECTS.length);
               return (
                 <line key={s.key}
                   x1={orbitCx} y1={cy} x2={pos.x} y2={pos.y}
@@ -278,9 +303,9 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
         {level === 'chapter' && selectedSubject && (
           <>
-            <circle cx={orbitCx} cy={cy} r={260} fill="none" stroke="rgba(168,162,158,0.3)" strokeWidth={1} strokeDasharray="4 6" />
+            <circle cx={orbitCx} cy={cy} r={rChapter} fill="none" stroke="rgba(168,162,158,0.3)" strokeWidth={1} strokeDasharray="4 6" />
             {chapters.map((ch, i) => {
-              const pos = polarPos(orbitCx, cy, 260, i, chapters.length);
+              const pos = polarPos(orbitCx, cy, rChapter, i, chapters.length);
               return (
                 <line key={ch.id}
                   x1={orbitCx} y1={cy} x2={pos.x} y2={pos.y}
@@ -294,10 +319,10 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
         {level === 'concept' && selectedChapter && (
           <>
-            <circle cx={orbitCx} cy={cy} r={270} fill="none" stroke="rgba(168,162,158,0.3)" strokeWidth={1} strokeDasharray="4 6" />
+            <circle cx={orbitCx} cy={cy} r={rConcept} fill="none" stroke="rgba(168,162,158,0.3)" strokeWidth={1} strokeDasharray="4 6" />
             {(CONCEPT_DATA[selectedChapter] ?? []).map((c, i) => {
               const total = (CONCEPT_DATA[selectedChapter] ?? []).length;
-              const pos = polarPos(orbitCx, cy, 270, i, total);
+              const pos = polarPos(orbitCx, cy, rConcept, i, total);
               const col = masteryColor(c.state);
               return (
                 <line key={c.id}
@@ -311,9 +336,9 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
         {level === 'english' && (
           <>
-            <circle cx={orbitCx} cy={cy} r={220} fill="none" stroke={COLORS.english + '44'} strokeWidth={1.5} strokeDasharray="8 5" />
+            <circle cx={orbitCx} cy={cy} r={rEnglish} fill="none" stroke={COLORS.english + '44'} strokeWidth={1.5} strokeDasharray="8 5" />
             {ENGLISH_TRACKS.map((t, i) => {
-              const pos = polarPos(orbitCx, cy, 220, i, ENGLISH_TRACKS.length);
+              const pos = polarPos(orbitCx, cy, rEnglish, i, ENGLISH_TRACKS.length);
               return (
                 <line key={t.key}
                   x1={orbitCx} y1={cy} x2={pos.x} y2={pos.y}
@@ -338,7 +363,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       {level === 'subject' && (
         <SubjectNodes
           key={`subj-${animKey}`}
-          cx={orbitCx} cy={cy} r={240}
+          cx={orbitCx} cy={cy} r={rSubject}
           onSelect={zoomToSubject}
         />
       )}
@@ -346,7 +371,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       {level === 'chapter' && selectedSubject && (
         <ChapterNodes
           key={`chap-${animKey}`}
-          cx={orbitCx} cy={cy} r={260}
+          cx={orbitCx} cy={cy} r={rChapter}
           chapters={chapters}
           subjectColor={subjectDisplay(selectedSubject).color}
           onSelect={zoomToChapter}
@@ -356,7 +381,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       {level === 'concept' && selectedChapter && (
         <ConceptNodes
           key={`conc-${animKey}`}
-          cx={orbitCx} cy={cy} r={270}
+          cx={orbitCx} cy={cy} r={rConcept}
           chapterId={selectedChapter}
           onSelect={openConcept}
         />
@@ -365,13 +390,13 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       {level === 'english' && (
         <EnglishTracks
           key={`eng-${animKey}`}
-          cx={orbitCx} cy={cy} r={220}
+          cx={orbitCx} cy={cy} r={rEnglish}
           onSelect={zoomToEnglishTrack}
         />
       )}
 
-      {/* Bottom CTAs */}
-      <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-4">
+      {/* Bottom CTAs (raised above the mobile bottom nav) */}
+      <div className="absolute bottom-20 lg:bottom-6 left-0 right-0 flex flex-wrap justify-center gap-3 lg:gap-4 px-3">
         <button
           onClick={() => router.push('/sharpen')}
           className="flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold text-sm text-white transition-all hover:opacity-90 active:scale-[0.98]"

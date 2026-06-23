@@ -44,7 +44,7 @@ export default function ForgotPasswordPage() {
           style={{ width: 500, height: 500, background: '#0d9488', right: '10%', bottom: '-10%' }} />
       </div>
 
-      <header className="relative flex items-center gap-3 px-10 pt-8">
+      <header className="relative flex items-center gap-3 px-6 sm:px-10 pt-8">
         <svg width="40" height="40" viewBox="0 0 40 40">
           <circle cx="20" cy="20" r="18" fill="rgba(79,70,229,0.1)" />
           <circle cx="20" cy="20" r="18" fill="none" stroke="#4F46E5" strokeWidth="1.5" />
@@ -55,7 +55,7 @@ export default function ForgotPasswordPage() {
 
       <main className="relative flex-1 flex items-center justify-center px-4 py-12">
         <div
-          className="w-full max-w-md rounded-3xl p-10"
+          className="w-full max-w-md rounded-3xl p-6 sm:p-10"
           style={{
             background: 'rgba(255,255,255,0.78)',
             backdropFilter: 'blur(24px)',

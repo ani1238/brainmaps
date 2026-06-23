@@ -386,10 +386,10 @@ function SharpenContent() {
     const nextLabel = nextLevel ? LEVEL_TO_STATION_LABEL[nextLevel] : null;
 
     return (
-      <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
+      <div className="relative flex flex-col lg:flex-row min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: '#F4EFE5' }}>
         <GridBackground />
         <LeftRail />
-        <main className="flex-1 overflow-y-auto flex items-start justify-center py-8">
+        <main className="flex-1 lg:overflow-y-auto flex items-start justify-center py-6 lg:py-8 pb-24 lg:pb-8 px-4 lg:px-0">
           <div
             className="text-center p-8 rounded-3xl w-full"
             style={{
@@ -521,10 +521,10 @@ function SharpenContent() {
   // question — this is what used to flash the demo photosynthesis set.
   if (questions.length === 0) {
     return (
-      <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
+      <div className="relative flex flex-col lg:flex-row min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: '#F4EFE5' }}>
         <GridBackground />
         <LeftRail />
-        <main className="flex-1 flex items-center justify-center">
+        <main className="flex-1 flex items-center justify-center pb-24 lg:pb-0 px-4">
           <div className="text-center">
             {loadingQuestions ? (
               <>
@@ -566,13 +566,13 @@ function SharpenContent() {
   const question = questions[currentIdx];
 
   return (
-    <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
+    <div className="relative flex flex-col lg:flex-row min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: '#F4EFE5' }}>
       <GridBackground />
       <LeftRail />
-      <main className="flex-1 flex">
-        {/* Left: concept context */}
+      <main className="flex-1 flex pb-20 lg:pb-0">
+        {/* Left: concept context (desktop only) */}
         <div
-          className="flex flex-col justify-between p-8"
+          className="hidden lg:flex flex-col justify-between p-8"
           style={{
             width: 320,
             background: 'rgba(255,255,255,0.4)',
@@ -648,9 +648,9 @@ function SharpenContent() {
         </div>
 
         {/* Right: question panel */}
-        <div className="flex-1 flex items-stretch">
+        <div className="flex-1 flex items-stretch min-w-0">
           <div
-            className="w-full max-w-xl mx-auto my-6 rounded-2xl overflow-hidden shadow-xl"
+            className="w-full max-w-xl mx-auto my-4 lg:my-6 px-3 lg:px-0 rounded-2xl lg:rounded-2xl overflow-hidden lg:shadow-xl flex flex-col"
             style={{ border: '1px solid rgba(0,0,0,0.08)' }}
           >
             <QuestionScreen
@@ -695,11 +695,11 @@ function TodaysFixReport() {
   }
 
   return (
-    <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
+    <div className="relative flex flex-col lg:flex-row min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: '#F4EFE5' }}>
       <GridBackground />
       <LeftRail />
-      <main className="flex-1 overflow-y-auto flex items-start justify-center py-10">
-        <div className="w-full max-w-xl px-6">
+      <main className="flex-1 lg:overflow-y-auto flex items-start justify-center py-6 lg:py-10 pb-24 lg:pb-10">
+        <div className="w-full max-w-xl px-4 lg:px-6">
           <div className="mb-1 text-xs font-bold tracking-widest" style={{ color: COLORS.weak }}>🔧 TODAY&apos;S FIX</div>
           <h1 className="text-3xl font-extrabold" style={{ color: '#1c1917' }}>
             {items === null ? 'Loading your fixes…'

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans, JetBrains_Mono, Inter, Playfair_Display } from "next/font/google";
 import { AuthGate } from "@/components/AuthGate";
 import "./globals.css";
@@ -31,6 +31,13 @@ const playfair = Playfair_Display({
 export const metadata: Metadata = {
   title: "BrainMaps — Premium Learning for Classes 3–7",
   description: "Spaced-repetition assessment engine for CBSE/ICSE students",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: "#F4EFE5",
 };
 
 export default function RootLayout({
