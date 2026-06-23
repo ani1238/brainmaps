@@ -134,27 +134,22 @@ function MCQQuestion({ question, onNext, onAnswer, onSubmitAnswer, deferAnswerFe
   deferAnswerFeedback?: boolean;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState(false);
 
+  // Selecting only highlights the chosen option (changeable). The answer is
+  // recorded when the learner taps Next — no right/wrong is shown inline.
   function handleSelect(id: string) {
-    if (revealed) return;
     setSelected(id);
-    setRevealed(true);
-    if (!deferAnswerFeedback) {
-      const correctId = question.options?.find(o => o.correct)?.id;
-      onAnswer?.(id === correctId);
-    }
-    onSubmitAnswer?.({ questionId: question.id, questionType: 'MCQ', chosenOption: id });
   }
 
   function handleAction() {
-    if (revealed) {
-      setSelected(null);
-      setRevealed(false);
-      onNext();
-    } else {
-      onNext();
+    if (!selected) return;
+    if (!deferAnswerFeedback) {
+      const correctId = question.options?.find(o => o.correct)?.id;
+      onAnswer?.(selected === correctId);
     }
+    onSubmitAnswer?.({ questionId: question.id, questionType: question.type, chosenOption: selected });
+    setSelected(null);
+    onNext();
   }
 
   const options = question.options ?? [];
@@ -173,8 +168,6 @@ function MCQQuestion({ question, onNext, onAnswer, onSubmitAnswer, deferAnswerFe
       <div className="flex flex-col gap-2.5">
         {options.map(o => {
           const isSelected = selected === o.id;
-          const isCorrect = !deferAnswerFeedback && revealed && o.correct;
-          const isWrong = !deferAnswerFeedback && revealed && isSelected && !o.correct;
 
           return (
             <button
@@ -182,54 +175,34 @@ function MCQQuestion({ question, onNext, onAnswer, onSubmitAnswer, deferAnswerFe
               onClick={() => handleSelect(o.id)}
               className="flex items-center gap-3 w-full px-4 py-3.5 rounded-xl text-left transition-all"
               style={{
-                background: isWrong ? '#fee2e2' : isCorrect ? '#dcfce7' : 'rgba(0,0,0,0.02)',
-                border: `1.5px solid ${isWrong ? '#ef4444' : isCorrect ? '#22c55e' : 'rgba(0,0,0,0.1)'}`,
-                cursor: revealed ? 'default' : 'pointer',
+                background: isSelected ? 'rgba(79,70,229,0.1)' : 'rgba(0,0,0,0.02)',
+                border: `1.5px solid ${isSelected ? '#4F46E5' : 'rgba(0,0,0,0.1)'}`,
+                cursor: 'pointer',
               }}
             >
               <span
                 className="w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
                 style={{
-                  border: `1.5px solid ${isWrong ? '#ef4444' : isCorrect ? '#22c55e' : 'rgba(0,0,0,0.2)'}`,
-                  color: isWrong ? '#ef4444' : isCorrect ? '#22c55e' : '#44403c',
+                  background: isSelected ? '#4F46E5' : 'transparent',
+                  border: `1.5px solid ${isSelected ? '#4F46E5' : 'rgba(0,0,0,0.2)'}`,
+                  color: isSelected ? '#ffffff' : '#44403c',
                 }}
               >
                 {o.id.toUpperCase()}
               </span>
               <span className="font-semibold text-sm flex-1" style={{ color: '#1c1917' }}>{o.text}</span>
-              {isCorrect && <span className="text-xl">✓</span>}
-              {isWrong && <span className="text-xl">✗</span>}
             </button>
           );
         })}
       </div>
 
-      {deferAnswerFeedback && revealed && (
-        <div
-          className="p-4 rounded-xl text-sm"
-          style={{ background: 'rgba(79,70,229,0.06)', border: '1px solid rgba(79,70,229,0.2)', color: '#44403c' }}
-        >
-          Answer saved. You can check it in Review answers after the session.
-        </div>
-      )}
-
-      {!deferAnswerFeedback && revealed && question.explanation && (
-        <div
-          className="p-4 rounded-xl"
-          style={{ background: 'rgba(79,70,229,0.06)', border: '1px solid rgba(79,70,229,0.2)' }}
-        >
-          <div className="text-xs font-bold mb-1.5" style={{ color: '#4F46E5' }}>Why?</div>
-          <p className="text-sm leading-relaxed" style={{ color: '#44403c' }}>{question.explanation}</p>
-        </div>
-      )}
-
       <button
         onClick={handleAction}
-        disabled={!revealed}
+        disabled={!selected}
         className="py-3 rounded-xl font-bold text-sm text-white transition-all hover:opacity-90 active:scale-[0.98] mt-2 disabled:opacity-40 disabled:cursor-default"
         style={{ background: '#4F46E5' }}
       >
-        {revealed ? '→ Next' : 'Pick an answer'}
+        {selected ? '→ Next' : 'Pick an answer'}
       </button>
     </div>
   );
