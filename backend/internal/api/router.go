@@ -53,12 +53,14 @@ func NewRouter() http.Handler {
 			r.Get("/concepts", handlers.GetConcepts)
 			r.Get("/concepts/{id}", handlers.GetConcept)
 			r.Get("/concepts/{id}/questions", handlers.GetConceptQuestions)
+			r.Get("/concepts/{id}/sessions", handlers.ListConceptSessions) // past attempts (student-scoped)
 
 			// Session flow (student-scoped; ownership validated per handler)
 			r.Post("/sessions", handlers.StartSession)
 			r.Post("/sessions/{id}/complete", handlers.CompleteSession)
 			r.Get("/sessions/{id}", handlers.GetSession)
 			r.Get("/sessions/{id}/review", handlers.GetSessionReview)
+			r.Get("/sessions/{id}/report", handlers.GetSessionReportByStudent) // review a past owned session
 
 			// Today's plan + dashboard/progress summary
 			r.Get("/today", handlers.GetToday)

@@ -569,3 +569,30 @@ export async function getSessionReview(session: ActiveSession): Promise<SessionR
   if (!res.ok) throw new Error(`getSessionReview ${res.status}`);
   return res.json();
 }
+
+// A previously completed attempt at a concept (newest first in the history list).
+export interface PastSession {
+  sessionId: string;
+  station: QuestionLevel;
+  score: number;
+  completedAt: string;
+}
+
+// List the learner's completed attempts for a concept, optionally for one level.
+export async function listConceptSessions(
+  conceptId: string,
+  level?: QuestionLevel,
+): Promise<PastSession[]> {
+  const qs = level ? `?level=${encodeURIComponent(level)}` : '';
+  const res = await authedFetch(`${API_BASE}/concepts/${conceptId}/sessions${qs}`);
+  if (!res.ok) throw new Error(`listConceptSessions ${res.status}`);
+  return res.json();
+}
+
+// Review any of the learner's own past sessions by id (student-authenticated,
+// no per-session token needed — used to reopen previous reports).
+export async function getSessionReportById(sessionId: string): Promise<SessionReview> {
+  const res = await authedFetch(`${API_BASE}/sessions/${sessionId}/report`);
+  if (!res.ok) throw new Error(`getSessionReportById ${res.status}`);
+  return res.json();
+}

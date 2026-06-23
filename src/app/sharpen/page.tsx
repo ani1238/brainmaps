@@ -14,7 +14,8 @@ import { STATION_LABELS } from '@/lib/tokens';
 import type { QuestionLevel } from '@/types';
 import {
   fetchConcept, fetchQuestions, startSession, completeSession, getSession, getSessionReview, fetchToday,
-  type ActiveSession, type SubmitAnswer, type SessionResult, type SessionReview,
+  listConceptSessions, getSessionReportById,
+  type ActiveSession, type SubmitAnswer, type SessionResult, type SessionReview, type PastSession,
   type SessionReviewAnswer, type ApiConceptDetail, type ApiTodayItem,
 } from '@/lib/api';
 import type { Question } from '@/types';
@@ -234,6 +235,13 @@ function clearAttempt(conceptId: string | null, level: string | null): void {
   }
 }
 
+// Short "12 Jun" label for a past attempt in the previous-reports list.
+function formatAttemptDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Attempt';
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
 function SharpenContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -303,6 +311,10 @@ function SharpenContent() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState('');
+  // Previous attempts at this concept+level (for the "Previous reports" group).
+  const [history, setHistory] = useState<PastSession[] | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [activeReportId, setActiveReportId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch the real concept's details (name, subject, chapter, recap) from the DB.
@@ -445,6 +457,9 @@ function SharpenContent() {
     setReview(null);
     setReviewOpen(false);
     setReviewError('');
+    setHistory(null);
+    setHistoryOpen(false);
+    setActiveReportId(null);
     if (pollRef.current) clearInterval(pollRef.current);
 
     // Fetch a fresh adaptive set and explicitly exclude every question the
@@ -489,6 +504,40 @@ function SharpenContent() {
       setReview(await getSessionReview(sessionRef.current));
     } catch {
       setReviewError('Review could not be loaded. Please try again.');
+    } finally {
+      setReviewLoading(false);
+    }
+  }
+
+  // Toggle the "Previous reports" group, lazily loading this concept+level's
+  // completed attempts the first time it's opened.
+  async function togglePreviousReports() {
+    const next = !historyOpen;
+    setHistoryOpen(next);
+    if (next && history === null && conceptId) {
+      try {
+        setHistory(await listConceptSessions(conceptId, level ?? undefined));
+      } catch {
+        setHistory([]);
+      }
+    }
+  }
+
+  // Open (or collapse) the review for a specific past attempt by id.
+  async function openReport(sessionId: string) {
+    if (reviewOpen && activeReportId === sessionId) {
+      setReviewOpen(false);
+      setActiveReportId(null);
+      return;
+    }
+    setActiveReportId(sessionId);
+    setReviewOpen(true);
+    setReviewLoading(true);
+    setReviewError('');
+    try {
+      setReview(await getSessionReportById(sessionId));
+    } catch {
+      setReviewError('Report could not be loaded. Please try again.');
     } finally {
       setReviewLoading(false);
     }
@@ -582,15 +631,6 @@ function SharpenContent() {
             {!aiStillGrading && reviewOpen && review && <ReviewList review={review} />}
 
             <div className="flex flex-col gap-3">
-              {!aiStillGrading && apiResult?.reviewAvailable && (
-                <button
-                  onClick={handleReviewAnswers}
-                  className="px-6 py-3 rounded-xl font-bold text-sm"
-                  style={{ background: 'rgba(79,70,229,0.08)', color: COLORS.indigo }}
-                >
-                  {reviewOpen ? 'Hide answer review' : 'Review answers'}
-                </button>
-              )}
               {/* Passed + next level exists → go to next station */}
               {!aiStillGrading && passed && nextLevel && (
                 <button
@@ -614,7 +654,69 @@ function SharpenContent() {
                   🎉 Concept complete — Back to {returnTarget.label}
                 </button>
               )}
-              {/* Failed → retry this level */}
+
+              {/* Passed → revise this level + browse previous reports */}
+              {!aiStillGrading && passed && (
+                <>
+                  <button
+                    onClick={handleRetry}
+                    className="px-6 py-3 rounded-xl font-bold text-sm"
+                    style={{ background: 'rgba(79,70,229,0.08)', color: COLORS.indigo }}
+                  >
+                    🔁 Revise this level
+                  </button>
+                  <button
+                    onClick={togglePreviousReports}
+                    className="px-6 py-3 rounded-xl font-bold text-sm"
+                    style={{ background: 'rgba(0,0,0,0.04)', color: '#57534e' }}
+                  >
+                    📄 {historyOpen ? 'Hide previous reports' : 'Previous reports'}
+                  </button>
+                  {historyOpen && (
+                    <div className="flex flex-col gap-2">
+                      {history === null && (
+                        <p className="text-sm" style={{ color: '#78716c' }}>Loading previous attempts…</p>
+                      )}
+                      {history?.length === 0 && (
+                        <p className="text-sm" style={{ color: '#a8a29e' }}>No previous attempts yet.</p>
+                      )}
+                      {history?.map((s, i) => {
+                        const open = reviewOpen && activeReportId === s.sessionId;
+                        return (
+                          <button
+                            key={s.sessionId}
+                            onClick={() => openReport(s.sessionId)}
+                            className="flex items-center justify-between px-4 py-2.5 rounded-xl font-semibold text-sm transition-all hover:opacity-90"
+                            style={{ background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(0,0,0,0.08)', color: '#44403c' }}
+                          >
+                            <span>
+                              {formatAttemptDate(s.completedAt)}
+                              {i === 0 && <span style={{ color: COLORS.indigo }}> · Latest</span>}
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <span style={{ color: Math.round(s.score * 100) >= 60 ? '#16a34a' : '#f97316' }}>
+                                {Math.round(s.score * 100)}%
+                              </span>
+                              <span style={{ color: '#a8a29e' }}>{open ? '▲' : '▾'}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Failed → review this attempt + retry */}
+              {!aiStillGrading && !passed && apiResult?.reviewAvailable && (
+                <button
+                  onClick={handleReviewAnswers}
+                  className="px-6 py-3 rounded-xl font-bold text-sm"
+                  style={{ background: 'rgba(79,70,229,0.08)', color: COLORS.indigo }}
+                >
+                  {reviewOpen ? 'Hide answer review' : 'Review answers'}
+                </button>
+              )}
               {!aiStillGrading && !passed && (
                 <button
                   onClick={handleRetry}
