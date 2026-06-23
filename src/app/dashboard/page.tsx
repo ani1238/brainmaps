@@ -108,7 +108,7 @@ export default function DashboardPage() {
             {(dash?.subjects ?? []).map(s => {
               const meta = subjectMeta(s.key);
               return (
-                <Link key={s.key} href="/brain-map" className="flex-1 min-w-0 hover:opacity-80 transition-opacity">
+                <Link key={s.key} href={`/brain-map?subject=${s.key}`} className="flex-1 min-w-0 hover:opacity-80 transition-opacity">
                   <div className="flex items-center gap-2 mb-1.5 min-w-0">
                     <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: meta.color }}>
                       {meta.letter}
