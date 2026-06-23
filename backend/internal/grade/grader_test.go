@@ -77,29 +77,21 @@ func TestDecideTagLifecycle(t *testing.T) {
 }
 
 func TestLevelPassGate(t *testing.T) {
-	failing := map[string]tagStat{"fractions": {Total: 3, Correct: 1}}
-	passing := map[string]tagStat{
-		"fractions": {Total: 3, Correct: 2},
-		"decimals":  {Total: 2, Correct: 1},
-	}
-
 	tests := []struct {
-		name     string
-		score    float64
-		isRetry  bool
-		targeted map[string]tagStat
-		want     bool
+		name  string
+		score float64
+		want  bool
 	}{
-		{"score below threshold always fails", 0.55, true, nil, false},
-		{"first attempt ignores targeted tags", 0.70, false, failing, true},
-		{"retry with a failing targeted tag fails", 0.70, true, failing, false},
-		{"retry with all targeted tags demonstrated passes", 0.70, true, passing, true},
-		{"retry with no targeted tags passes on score", 0.70, true, map[string]tagStat{}, true},
+		{"score below threshold fails", 0.55, false},
+		{"score exactly at threshold passes", 0.60, true},
+		{"score above threshold passes", 0.70, true},
+		{"retry at passing score still passes (no tag-gate)", 0.65, true},
+		{"perfect score passes", 1.0, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := levelPassGate(tt.score, tt.isRetry, tt.targeted); got != tt.want {
-				t.Errorf("levelPassGate(%v, %t, %v) = %t, want %t", tt.score, tt.isRetry, tt.targeted, got, tt.want)
+			if got := levelPassGate(tt.score); got != tt.want {
+				t.Errorf("levelPassGate(%v) = %t, want %t", tt.score, got, tt.want)
 			}
 		})
 	}
