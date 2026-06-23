@@ -119,6 +119,10 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
   const rConcept = 270 * orbitScale;
   const rEnglish = 220 * orbitScale;
 
+  // On phones the orbit radius shrinks but node sizes are fixed, so they
+  // overlap. Scale the nodes down on narrow screens to restore spacing.
+  const nodeScale = isNarrow ? 0.6 : 1;
+
   function zoomToSubject(subjectKey: string, subjectLabel: string) {
     if (subjectKey === 'english') {
       setLevel('english');
@@ -363,7 +367,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       {level === 'subject' && (
         <SubjectNodes
           key={`subj-${animKey}`}
-          cx={orbitCx} cy={cy} r={rSubject}
+          cx={orbitCx} cy={cy} r={rSubject} scale={nodeScale}
           onSelect={zoomToSubject}
         />
       )}
@@ -371,7 +375,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       {level === 'chapter' && selectedSubject && (
         <ChapterNodes
           key={`chap-${animKey}`}
-          cx={orbitCx} cy={cy} r={rChapter}
+          cx={orbitCx} cy={cy} r={rChapter} scale={nodeScale}
           chapters={chapters}
           subjectColor={subjectDisplay(selectedSubject).color}
           onSelect={zoomToChapter}
@@ -381,7 +385,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       {level === 'concept' && selectedChapter && (
         <ConceptNodes
           key={`conc-${animKey}`}
-          cx={orbitCx} cy={cy} r={rConcept}
+          cx={orbitCx} cy={cy} r={rConcept} scale={nodeScale}
           chapterId={selectedChapter}
           onSelect={openConcept}
         />
@@ -390,7 +394,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       {level === 'english' && (
         <EnglishTracks
           key={`eng-${animKey}`}
-          cx={orbitCx} cy={cy} r={rEnglish}
+          cx={orbitCx} cy={cy} r={rEnglish} scale={nodeScale}
           onSelect={zoomToEnglishTrack}
         />
       )}
@@ -536,8 +540,8 @@ function CenterNode({
   return null;
 }
 
-function SubjectNodes({ cx, cy, r, onSelect }: {
-  cx: number; cy: number; r: number;
+function SubjectNodes({ cx, cy, r, scale = 1, onSelect }: {
+  cx: number; cy: number; r: number; scale?: number;
   onSelect: (key: string, label: string) => void;
 }) {
   return (
@@ -552,8 +556,9 @@ function SubjectNodes({ cx, cy, r, onSelect }: {
             className="absolute flex flex-col items-center cursor-pointer group"
             style={{
               left: x - 48, top: y - 48,
+              transform: `scale(${scale})`, transformOrigin: '50% 48px',
               animationDelay: `${i * 80}ms`,
-              animation: 'node-pop-direct 0.4s cubic-bezier(0.34,1.56,0.64,1) both',
+              animation: 'fade-in 0.4s ease-out both',
             }}
             onClick={() => onSelect(s.key, s.label)}
           >
@@ -596,9 +601,9 @@ function SubjectNodes({ cx, cy, r, onSelect }: {
   );
 }
 
-function ChapterNodes({ cx, cy, r, chapters, subjectColor, onSelect }: {
+function ChapterNodes({ cx, cy, r, chapters, subjectColor, scale = 1, onSelect }: {
   cx: number; cy: number; r: number;
-  chapters: ApiChapter[]; subjectColor: string;
+  chapters: ApiChapter[]; subjectColor: string; scale?: number;
   onSelect: (id: string, name: string) => void;
 }) {
   if (chapters.length === 0) {
@@ -622,8 +627,9 @@ function ChapterNodes({ cx, cy, r, chapters, subjectColor, onSelect }: {
             className="absolute flex flex-col items-center cursor-pointer group"
             style={{
               left: x - 56, top: y - 56,
+              transform: `scale(${scale})`, transformOrigin: '50% 40px',
               animationDelay: `${i * 60}ms`,
-              animation: 'node-pop-direct 0.35s cubic-bezier(0.34,1.56,0.64,1) both',
+              animation: 'fade-in 0.35s ease-out both',
             }}
             onClick={() => onSelect(ch.id, ch.name)}
           >
@@ -653,9 +659,9 @@ function ChapterNodes({ cx, cy, r, chapters, subjectColor, onSelect }: {
   );
 }
 
-function ConceptNodes({ cx, cy, r, chapterId, onSelect }: {
+function ConceptNodes({ cx, cy, r, chapterId, scale = 1, onSelect }: {
   cx: number; cy: number; r: number;
-  chapterId: string;
+  chapterId: string; scale?: number;
   onSelect: (concept: Concept) => void;
 }) {
   const [concepts, setConcepts] = useState<Concept[]>(CONCEPT_DATA[chapterId] ?? []);
@@ -682,8 +688,9 @@ function ConceptNodes({ cx, cy, r, chapterId, onSelect }: {
             className="absolute flex flex-col items-center cursor-pointer group"
             style={{
               left: x - 44, top: y - 44,
+              transform: `scale(${scale})`, transformOrigin: '50% 28px',
               animationDelay: `${i * 50}ms`,
-              animation: 'node-pop-direct 0.35s cubic-bezier(0.34,1.56,0.64,1) both',
+              animation: 'fade-in 0.35s ease-out both',
             }}
             onClick={() => onSelect(c)}
           >
@@ -728,8 +735,8 @@ const ENGLISH_TRACK_SUBJECT: Record<string, string> = {
   wri: 'english_writing',
 };
 
-function EnglishTracks({ cx, cy, r, onSelect }: {
-  cx: number; cy: number; r: number;
+function EnglishTracks({ cx, cy, r, scale = 1, onSelect }: {
+  cx: number; cy: number; r: number; scale?: number;
   onSelect: (subjectKey: string, label: string) => void;
 }) {
   return (
@@ -742,8 +749,9 @@ function EnglishTracks({ cx, cy, r, onSelect }: {
             className="absolute flex flex-col items-center cursor-pointer group"
             style={{
               left: x - 72, top: y - 28,
+              transform: `scale(${scale})`, transformOrigin: '50% 28px',
               animationDelay: `${i * 60}ms`,
-              animation: 'node-pop-direct 0.4s cubic-bezier(0.34,1.56,0.64,1) both',
+              animation: 'fade-in 0.4s ease-out both',
             }}
             onClick={() => onSelect(ENGLISH_TRACK_SUBJECT[t.key] ?? 'english', t.label)}
           >
