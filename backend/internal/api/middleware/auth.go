@@ -2,20 +2,24 @@ package middleware
 
 import (
 	"context"
-	"crypto/sha256"
 	"net/http"
 	"strings"
 
+	"github.com/ani1238/brainmaps-api/internal/auth"
 	"github.com/ani1238/brainmaps-api/internal/db"
 )
 
 type contextKey string
 
-const userIDKey contextKey = "userID"
+const (
+	userIDKey    contextKey = "userID"
+	studentIDKey contextKey = "studentID"
+)
 
-// RequireAuth validates the Bearer token in the Authorization header and
-// injects the user ID into the request context. Returns 401 when the
-// token is missing, unknown, or expired.
+// RequireAuth validates the Bearer JWT access token in the Authorization
+// header and injects the user id (and 1:1 student id) into the request
+// context. Verification is stateless — no database round-trip. Returns 401
+// when the token is missing, malformed, mis-signed, or expired.
 func RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
@@ -23,22 +27,13 @@ func RequireAuth(next http.Handler) http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
-		hash := sha256.Sum256([]byte(token))
-		var userID string
-		err := db.Pool.QueryRow(r.Context(), `
-			UPDATE auth_sessions
-			   SET last_used_at = now()
-			 WHERE token_hash = $1
-			   AND expires_at  > now()
-			RETURNING user_id
-		`, hash[:]).Scan(&userID)
+		claims, err := auth.VerifyAccessToken(token)
 		if err != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
-		ctx := context.WithValue(r.Context(), userIDKey, userID)
+		ctx := context.WithValue(r.Context(), userIDKey, claims.Sub)
+		ctx = context.WithValue(ctx, studentIDKey, claims.Sid)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -50,19 +45,21 @@ func UserID(ctx context.Context) (string, bool) {
 	return id, ok && id != ""
 }
 
-// StudentForUser returns the single student row paired with the authenticated
-// user (the learner anchor). Returns ("", false) when unauthenticated or when
-// the 1:1 student is missing.
+// StudentForUser returns the 1:1 student id carried in the access token claims,
+// falling back to a DB lookup if the claim is absent. Returns ("", false) when
+// unauthenticated or when no student exists.
 func StudentForUser(ctx context.Context) (string, bool) {
+	if id, ok := ctx.Value(studentIDKey).(string); ok && id != "" {
+		return id, true
+	}
 	userID, ok := UserID(ctx)
 	if !ok {
 		return "", false
 	}
 	var studentID string
-	err := db.Pool.QueryRow(ctx, `
+	if err := db.Pool.QueryRow(ctx, `
 		SELECT id FROM students WHERE user_id = $1
-	`, userID).Scan(&studentID)
-	if err != nil {
+	`, userID).Scan(&studentID); err != nil {
 		return "", false
 	}
 	return studentID, true

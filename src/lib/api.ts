@@ -8,7 +8,13 @@
  */
 
 import type { Concept, Question, QuestionLevel } from '@/types';
-import { getProfile, getAuthToken } from '@/lib/storage';
+import {
+  getProfile,
+  getAuthToken,
+  getRefreshToken,
+  saveTokens,
+  clearTokens,
+} from '@/lib/storage';
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? '/api/v1';
@@ -26,6 +32,57 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${token}` };
 }
 
+// ─── Silent access-token refresh ──────────────────────────────────────────────
+// Access tokens are short-lived (~15 min). authedFetch transparently rotates the
+// refresh token and retries once on a 401, so users aren't logged out mid-session.
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function refreshTokens(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+  // De-duplicate concurrent refreshes.
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+        if (!res.ok) {
+          clearTokens();
+          return false;
+        }
+        const data = await res.json();
+        saveTokens(data.token, data.refreshToken);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+  return refreshInFlight;
+}
+
+/**
+ * fetch wrapper for protected endpoints: injects the bearer token and, on a 401,
+ * attempts a single silent refresh + retry before giving up.
+ */
+async function authedFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const run = () =>
+    fetch(input, { ...init, headers: { ...(init.headers ?? {}), ...authHeaders() } });
+
+  let res = await run();
+  if (res.status === 401 && getRefreshToken()) {
+    const ok = await refreshTokens();
+    if (ok) res = await run();
+  }
+  return res;
+}
+
 // Legacy helper retained for old demo components.
 export const LIVE_CONCEPT_IDS = new Set([
   's201', 's202', 's203', 's204', 's205', 's206', 's207',
@@ -39,6 +96,7 @@ export function isLiveConcept(conceptId: string): boolean {
 
 export interface AuthResponse {
   token: string;
+  refreshToken: string;
   userId: string;
   studentId: string;
   name: string;
@@ -84,17 +142,40 @@ export async function loginUser(
 }
 
 export async function logoutUser(): Promise<void> {
-  await fetch(`${API_BASE}/auth/logout`, {
+  const refreshToken = getRefreshToken();
+  try {
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+  } finally {
+    clearTokens();
+  }
+}
+
+/** Requests a password-reset email. Always resolves (never reveals existence). */
+export async function requestPasswordReset(email: string): Promise<void> {
+  await fetch(`${API_BASE}/auth/forgot`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
   });
+}
+
+/** Consumes a reset token and sets a new password. */
+export async function resetPassword(token: string, password: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/auth/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, password }),
+  });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 /** Rehydrates the authenticated learner's profile (class + board + student id). */
 export async function fetchMe(): Promise<LearnerProfile> {
-  const res = await fetch(`${API_BASE}/auth/me`, {
-    headers: authHeaders(),
-  });
+  const res = await authedFetch(`${API_BASE}/auth/me`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -241,18 +322,15 @@ export interface ApiConceptDetail {
 }
 
 export async function fetchConcept(conceptId: string): Promise<ApiConceptDetail> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${API_BASE}/concepts/${conceptId}?student=${studentId()}`,
-    { headers: authHeaders() },
   );
   if (!res.ok) throw new Error(`fetchConcept ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
 export async function fetchChapters(subjectKey: string): Promise<ApiChapter[]> {
-  const res = await fetch(`${API_BASE}/chapters?subject=${subjectKey}`, {
-    headers: authHeaders(),
-  });
+  const res = await authedFetch(`${API_BASE}/chapters?subject=${subjectKey}`);
   if (!res.ok) throw new Error(`fetchChapters ${res.status}: ${await res.text()}`);
   return res.json();
 }
@@ -272,9 +350,8 @@ export interface ApiDashboard {
 }
 
 export async function fetchDashboard(): Promise<ApiDashboard> {
-  const res = await fetch(`${API_BASE}/dashboard?student=${studentId()}`, {
+  const res = await authedFetch(`${API_BASE}/dashboard?student=${studentId()}`, {
     cache: 'no-store',
-    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`fetchDashboard ${res.status}: ${await res.text()}`);
   return res.json();
@@ -302,9 +379,8 @@ export interface ApiToday {
 }
 
 export async function fetchToday(): Promise<ApiToday> {
-  const res = await fetch(`${API_BASE}/today?student=${studentId()}`, {
+  const res = await authedFetch(`${API_BASE}/today?student=${studentId()}`, {
     cache: 'no-store',
-    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`fetchToday ${res.status}: ${await res.text()}`);
   const d = await res.json();
@@ -318,9 +394,9 @@ export async function fetchToday(): Promise<ApiToday> {
 }
 
 export async function fetchConcepts(chapterId: string): Promise<Concept[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${API_BASE}/concepts?chapter=${chapterId}&student=${studentId()}`,
-    { next: { revalidate: 0 }, headers: authHeaders() } // always fresh
+    { next: { revalidate: 0 } } as RequestInit // always fresh
   );
   if (!res.ok) throw new Error(`fetchConcepts ${res.status}: ${await res.text()}`);
   const data: ApiConcept[] = await res.json();
@@ -336,9 +412,7 @@ export async function fetchQuestions(
   // (a level the student previously failed) — targeting their weak concepts.
   const params = new URLSearchParams({ level, student: studentId() });
   excludeQuestionIds.forEach(id => params.append('exclude', id));
-  const res = await fetch(`${API_BASE}/concepts/${conceptId}/questions?${params}`, {
-    headers: authHeaders(),
-  });
+  const res = await authedFetch(`${API_BASE}/concepts/${conceptId}/questions?${params}`);
   if (!res.ok) throw new Error(`fetchQuestions ${res.status}: ${await res.text()}`);
   const data: ApiQuestion[] = await res.json();
   return data.map(mapQuestion);
@@ -391,9 +465,9 @@ export async function startSession(
   conceptId: string,
   station: QuestionLevel
 ): Promise<ActiveSession> {
-  const res = await fetch(`${API_BASE}/sessions`, {
+  const res = await authedFetch(`${API_BASE}/sessions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ studentId: studentId(), conceptId, station }),
   });
   if (!res.ok) throw new Error(`startSession ${res.status}`);
@@ -404,12 +478,11 @@ export async function completeSession(
   session: ActiveSession,
   answers: SubmitAnswer[]
 ): Promise<SessionResult> {
-  const res = await fetch(`${API_BASE}/sessions/${session.sessionId}/complete`, {
+  const res = await authedFetch(`${API_BASE}/sessions/${session.sessionId}/complete`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Session-Token': session.sessionToken,
-      ...authHeaders(),
     },
     body: JSON.stringify({ answers }),
   });
@@ -418,16 +491,16 @@ export async function completeSession(
 }
 
 export async function getSession(session: ActiveSession): Promise<SessionResult> {
-  const res = await fetch(`${API_BASE}/sessions/${session.sessionId}`, {
-    headers: { 'X-Session-Token': session.sessionToken, ...authHeaders() },
+  const res = await authedFetch(`${API_BASE}/sessions/${session.sessionId}`, {
+    headers: { 'X-Session-Token': session.sessionToken },
   });
   if (!res.ok) throw new Error(`getSession ${res.status}`);
   return res.json();
 }
 
 export async function getSessionReview(session: ActiveSession): Promise<SessionReview> {
-  const res = await fetch(`${API_BASE}/sessions/${session.sessionId}/review`, {
-    headers: { 'X-Session-Token': session.sessionToken, ...authHeaders() },
+  const res = await authedFetch(`${API_BASE}/sessions/${session.sessionId}/review`, {
+    headers: { 'X-Session-Token': session.sessionToken },
   });
   if (!res.ok) throw new Error(`getSessionReview ${res.status}`);
   return res.json();

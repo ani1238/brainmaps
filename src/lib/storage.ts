@@ -22,6 +22,7 @@ const KEYS = {
   profile:   'bm_profile',
   progress:  'bm_progress',
   authToken: 'bm_auth_token',
+  refreshToken: 'bm_refresh_token',
 } as const;
 
 // ─── Student profile ──────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ export function saveProfileFromLearner(learner: {
   return profile;
 }
 
-// ─── Auth token ───────────────────────────────────────────────────────────────
+// ─── Auth tokens (JWT access + rotating refresh) ──────────────────────────────
 
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -80,12 +81,33 @@ export function clearAuthToken(): void {
   localStorage.removeItem(KEYS.authToken);
 }
 
+export function getRefreshToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(KEYS.refreshToken);
+}
+
+export function saveRefreshToken(token: string): void {
+  if (token) localStorage.setItem(KEYS.refreshToken, token);
+}
+
+/** Persists the access + refresh token pair from an auth response. */
+export function saveTokens(access: string, refresh?: string): void {
+  saveAuthToken(access);
+  if (refresh) saveRefreshToken(refresh);
+}
+
+export function clearTokens(): void {
+  localStorage.removeItem(KEYS.authToken);
+  localStorage.removeItem(KEYS.refreshToken);
+}
+
 // ─── Clear everything on logout ───────────────────────────────────────────────
 
 export function clearProfile(): void {
   localStorage.removeItem(KEYS.profile);
   localStorage.removeItem(KEYS.progress);
   localStorage.removeItem(KEYS.authToken);
+  localStorage.removeItem(KEYS.refreshToken);
   window.dispatchEvent(new Event(PROFILE_EVENT));
 }
 

@@ -10,11 +10,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
 	authmw "github.com/ani1238/brainmaps-api/internal/api/middleware"
+	"github.com/ani1238/brainmaps-api/internal/auth"
 	"github.com/ani1238/brainmaps-api/internal/db"
+	"github.com/ani1238/brainmaps-api/internal/email"
 )
 
 // ── Password hashing (PBKDF2-HMAC-SHA256, stdlib only) ────────────────────────
@@ -87,17 +90,24 @@ func verifyPassword(password, stored string) bool {
 	return subtle.ConstantTimeCompare(actual, expected) == 1
 }
 
-// ── Bearer token helpers ───────────────────────────────────────────────────────
+// ── Token issuance ─────────────────────────────────────────────────────────────
 
-func newBearerToken() (plain string, hash []byte, err error) {
-	raw := make([]byte, 32)
-	if _, err = rand.Read(raw); err != nil {
+// mintTokens returns a signed JWT access token plus a fresh opaque refresh
+// token (and its hash for persistence in auth_sessions).
+func mintTokens(userID, studentID string) (access, refreshPlain string, refreshHash []byte, err error) {
+	access, err = auth.MintAccessToken(userID, studentID)
+	if err != nil {
 		return
 	}
-	plain = base64.RawURLEncoding.EncodeToString(raw)
-	sum := sha256.Sum256([]byte(plain))
-	hash = sum[:]
+	refreshPlain, refreshHash, err = auth.NewRefreshToken()
 	return
+}
+
+func appBaseURL() string {
+	if v := os.Getenv("APP_BASE_URL"); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return "https://brainmaps.in"
 }
 
 // ── Request / response shapes ─────────────────────────────────────────────────
@@ -115,16 +125,30 @@ type loginReq struct {
 	Password string `json:"password"`
 }
 
-// authResp is returned by register, login, and /auth/me. Each account is a
-// single learner, so the response carries the learner's class + board and the
-// 1:1 student id that anchors all progress.
+type refreshReq struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+type forgotReq struct {
+	Email string `json:"email"`
+}
+
+type resetReq struct {
+	Token    string `json:"token"`
+	Password string `json:"password"`
+}
+
+// authResp is returned by register, login, refresh, and /auth/me. Each account
+// is a single learner, so the response carries the learner's class + board and
+// the 1:1 student id that anchors all progress.
 type authResp struct {
-	Token     string `json:"token,omitempty"` // omitted by /auth/me
-	UserID    string `json:"userId"`
-	StudentID string `json:"studentId"`
-	Name      string `json:"name"`
-	Grade     int    `json:"grade"`
-	Board     string `json:"board"`
+	Token        string `json:"token,omitempty"`        // JWT access token
+	RefreshToken string `json:"refreshToken,omitempty"` // opaque rotating refresh token
+	UserID       string `json:"userId"`
+	StudentID    string `json:"studentId"`
+	Name         string `json:"name"`
+	Grade        int    `json:"grade"`
+	Board        string `json:"board"`
 }
 
 // normalizeGradeBoard clamps grade to 3..7 (default 6) and board to CBSE/ICSE.
@@ -142,8 +166,8 @@ func normalizeGradeBoard(grade int, board string) (int, string) {
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 // POST /auth/register
-// Creates a new single-learner account (with its 1:1 student) and returns an
-// auth token plus the learner's class + board.
+// Creates a new single-learner account (with its 1:1 student) and returns a JWT
+// access token + refresh token plus the learner's class + board.
 func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	var req registerReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -198,7 +222,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, tokenHash, err := newBearerToken()
+	access, refreshPlain, refreshHash, err := mintTokens(userID, studentID)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
@@ -206,7 +230,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.Exec(r.Context(), `
 		INSERT INTO auth_sessions (user_id, token_hash, user_agent, ip_address)
 		VALUES ($1, $2, $3, $4)
-	`, userID, tokenHash, r.UserAgent(), r.RemoteAddr)
+	`, userID, refreshHash, r.UserAgent(), r.RemoteAddr)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
@@ -220,18 +244,19 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(authResp{
-		Token:     token,
-		UserID:    userID,
-		StudentID: studentID,
-		Name:      name,
-		Grade:     grade,
-		Board:     board,
+		Token:        access,
+		RefreshToken: refreshPlain,
+		UserID:       userID,
+		StudentID:    studentID,
+		Name:         name,
+		Grade:        grade,
+		Board:        board,
 	})
 }
 
 // POST /auth/login
-// Validates credentials and returns a new auth token plus the learner's
-// class + board and 1:1 student id.
+// Validates credentials and returns a JWT access token + refresh token plus the
+// learner's class + board and 1:1 student id.
 func LoginUser(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -261,7 +286,7 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, tokenHash, err := newBearerToken()
+	access, refreshPlain, refreshHash, err := mintTokens(userID, studentID)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
@@ -269,34 +294,147 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	db.Pool.Exec(r.Context(), `
 		INSERT INTO auth_sessions (user_id, token_hash, user_agent, ip_address)
 		VALUES ($1, $2, $3, $4)
-	`, userID, tokenHash, r.UserAgent(), r.RemoteAddr)
+	`, userID, refreshHash, r.UserAgent(), r.RemoteAddr)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(authResp{
-		Token:     token,
-		UserID:    userID,
-		StudentID: studentID,
-		Name:      name,
-		Grade:     grade,
-		Board:     board,
+		Token:        access,
+		RefreshToken: refreshPlain,
+		UserID:       userID,
+		StudentID:    studentID,
+		Name:         name,
+		Grade:        grade,
+		Board:        board,
+	})
+}
+
+// POST /auth/refresh
+// Rotates a refresh token: the presented token is revoked and a new access +
+// refresh pair is issued. Returns 401 if the refresh token is unknown/expired.
+func RefreshSession(w http.ResponseWriter, r *http.Request) {
+	var req refreshReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	// Atomically consume the old refresh token (rotation).
+	var userID string
+	err := db.Pool.QueryRow(r.Context(), `
+		DELETE FROM auth_sessions
+		 WHERE token_hash = $1 AND expires_at > now()
+		RETURNING user_id
+	`, auth.HashToken(req.RefreshToken)).Scan(&userID)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var studentID string
+	db.Pool.QueryRow(r.Context(), `SELECT id FROM students WHERE user_id = $1`, userID).Scan(&studentID)
+
+	access, refreshPlain, refreshHash, err := mintTokens(userID, studentID)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	db.Pool.Exec(r.Context(), `
+		INSERT INTO auth_sessions (user_id, token_hash, user_agent, ip_address)
+		VALUES ($1, $2, $3, $4)
+	`, userID, refreshHash, r.UserAgent(), r.RemoteAddr)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(authResp{
+		Token:        access,
+		RefreshToken: refreshPlain,
+		UserID:       userID,
+		StudentID:    studentID,
 	})
 }
 
 // POST /auth/logout
-// Revokes the current session token. Safe to call without a valid token.
+// Revokes the supplied refresh token. Safe to call without a valid token.
 func LogoutUser(w http.ResponseWriter, r *http.Request) {
-	v := r.Header.Get("Authorization")
-	if strings.HasPrefix(v, "Bearer ") {
-		token := strings.TrimSpace(v[7:])
-		sum := sha256.Sum256([]byte(token))
-		db.Pool.Exec(r.Context(), `DELETE FROM auth_sessions WHERE token_hash = $1`, sum[:])
+	var req refreshReq
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.RefreshToken != "" {
+		db.Pool.Exec(r.Context(), `DELETE FROM auth_sessions WHERE token_hash = $1`,
+			auth.HashToken(req.RefreshToken))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// POST /auth/forgot
+// Issues a password-reset token and emails a reset link. Always responds 200 so
+// the response never reveals whether an account exists.
+func ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req forgotReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	addr := strings.ToLower(strings.TrimSpace(req.Email))
+
+	var userID string
+	err := db.Pool.QueryRow(r.Context(), `SELECT id FROM users WHERE lower(email) = $1`, addr).Scan(&userID)
+	if err == nil {
+		plain, hash, terr := auth.NewRefreshToken()
+		if terr == nil {
+			db.Pool.Exec(r.Context(), `
+				INSERT INTO recovery_tokens (user_id, token_hash) VALUES ($1, $2)
+			`, userID, hash)
+			resetURL := appBaseURL() + "/reset?token=" + plain
+			if serr := email.SendPasswordReset(r.Context(), addr, resetURL); serr != nil {
+				fmt.Printf("[forgot] email send failed for %s: %v\n", addr, serr)
+			}
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// POST /auth/reset
+// Consumes a valid reset token, sets a new password, and revokes all of the
+// user's existing sessions.
+func ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req resetReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.Token == "" || len(req.Password) < 8 {
+		http.Error(w, "token and password (≥8 chars) are required", http.StatusBadRequest)
+		return
+	}
+
+	// Atomically consume the reset token.
+	var userID string
+	err := db.Pool.QueryRow(r.Context(), `
+		UPDATE recovery_tokens
+		   SET used_at = now()
+		 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+		RETURNING user_id
+	`, auth.HashToken(req.Token)).Scan(&userID)
+	if err != nil {
+		http.Error(w, "invalid or expired token", http.StatusBadRequest)
+		return
+	}
+
+	pwHash, err := hashPassword(req.Password)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	db.Pool.Exec(r.Context(), `UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`, pwHash, userID)
+	// Revoke every active session for safety.
+	db.Pool.Exec(r.Context(), `DELETE FROM auth_sessions WHERE user_id = $1`, userID)
+
+	w.WriteHeader(http.StatusOK)
+}
+
 // GET /auth/me
 // Returns the authenticated learner's profile (class + board + 1:1 student id)
-// for client rehydration. No token is included in the response.
+// for client rehydration. No tokens are included in the response.
 func Me(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authmw.UserID(r.Context())
 	if !ok {

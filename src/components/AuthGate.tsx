@@ -6,7 +6,7 @@ import { useProfile, getAuthToken, saveProfileFromLearner, clearAuthToken } from
 import { fetchMe } from '@/lib/api';
 
 // Public routes that never require auth.
-const PUBLIC_PATHS = new Set(['/', '/register']);
+const PUBLIC_PATHS = new Set(['/', '/register', '/forgot', '/reset']);
 
 function subscribeHydration() {
   return () => {};

@@ -28,7 +28,10 @@ func NewRouter() http.Handler {
 		// ── Public: auth ──────────────────────────────────────────────────────
 		r.Post("/auth/register", handlers.RegisterUser)
 		r.Post("/auth/login", handlers.LoginUser)
-		r.Post("/auth/logout", handlers.LogoutUser) // graceful; ok without valid token
+		r.Post("/auth/refresh", handlers.RefreshSession) // rotate refresh -> new access
+		r.Post("/auth/logout", handlers.LogoutUser)      // graceful; ok without valid token
+		r.Post("/auth/forgot", handlers.ForgotPassword)  // request a reset link
+		r.Post("/auth/reset", handlers.ResetPassword)    // consume reset token
 
 		// ── Protected: all data routes require a valid user session ──────────
 		r.Group(func(r chi.Router) {
