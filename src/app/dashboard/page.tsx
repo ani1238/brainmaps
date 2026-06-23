@@ -160,6 +160,13 @@ export default function DashboardPage() {
                 </button>
               )}
             </div>
+            <Link
+              href="/sharpen"
+              className="mt-4 inline-flex items-center gap-1 text-sm font-bold self-start transition-opacity hover:opacity-80"
+              style={{ color: COLORS.weak }}
+            >
+              Go to Today&apos;s Fix →
+            </Link>
           </div>
 
           {/* Revise */}
@@ -194,6 +201,13 @@ export default function DashboardPage() {
                 </button>
               )}
             </div>
+            <Link
+              href="/recall"
+              className="mt-4 inline-flex items-center gap-1 text-sm font-bold self-start transition-opacity hover:opacity-80"
+              style={{ color: '#16a34a' }}
+            >
+              Go to Revise →
+            </Link>
           </div>
         </div>
 
