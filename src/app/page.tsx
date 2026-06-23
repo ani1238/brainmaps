@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { loginHousehold, requestCallback } from '@/lib/api';
-import { saveAuthToken } from '@/lib/storage';
+import { loginUser, requestCallback } from '@/lib/api';
+import { saveAuthToken, saveProfileFromLearner } from '@/lib/storage';
 
 // ─── Marketing hook slides (left panel) ───────────────────────────────────────
 
@@ -102,9 +102,10 @@ export default function LoginPage() {
     setLoggingIn(true);
     setLoginError('');
     try {
-      const auth = await loginHousehold(id.toLowerCase(), password);
+      const auth = await loginUser(id.toLowerCase(), password);
       saveAuthToken(auth.token);
-      router.push('/students');
+      saveProfileFromLearner(auth);
+      router.push('/dashboard');
     } catch (err) {
       setLoginError(
         err instanceof Error && err.message ? err.message : 'Invalid email or password.',

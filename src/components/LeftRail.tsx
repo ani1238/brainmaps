@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { fetchToday, fetchDashboard } from '@/lib/api';
-import { clearProfile, useProfile } from '@/lib/storage';
+import { fetchToday, fetchDashboard, logoutUser } from '@/lib/api';
+import { clearProfile, clearAuthToken, useProfile } from '@/lib/storage';
 
 interface LeftRailProps {
   studentName?: string;
@@ -98,14 +98,16 @@ export function LeftRail({
         </div>
         <button
           type="button"
-          onClick={() => {
+          onClick={async () => {
+            try { await logoutUser(); } catch { /* revoke best-effort */ }
+            clearAuthToken();
             clearProfile();
             router.push('/');
           }}
           className="mt-2 text-[11px] font-semibold"
           style={{ color: '#4F46E5' }}
         >
-          Switch student
+          Log out
         </button>
       </div>
 
