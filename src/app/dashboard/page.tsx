@@ -55,7 +55,7 @@ export default function DashboardPage() {
       <GridBackground />
       <LeftRail sharpenCount={fixCount} recallCount={reviseCount} streak={dash?.streak.days ?? 0} />
 
-      <main className="relative flex-1 overflow-y-auto px-8 py-6 flex flex-col gap-5">
+      <main className="relative flex-1 overflow-y-auto lg:overflow-hidden px-8 py-5 flex flex-col gap-4">
 
         {/* ── Header: greeting + mastery health bar ── */}
         <section
@@ -127,9 +127,9 @@ export default function DashboardPage() {
         </section>
 
         {/* ── Today's actions: Fix + Revise ── */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4 flex-1">
           {/* Today's Fix */}
-          <div className="rounded-2xl p-5" style={{ background: 'rgba(255,247,237,0.9)', border: '1.5px solid rgba(249,115,22,0.3)', backdropFilter: 'blur(12px)' }}>
+          <div className="rounded-2xl p-5 flex flex-col justify-center" style={{ background: 'rgba(255,247,237,0.9)', border: '1.5px solid rgba(249,115,22,0.3)', backdropFilter: 'blur(12px)' }}>
             <div className="flex justify-between items-start gap-3">
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-bold mb-1" style={{ color: COLORS.weak }}>🔧 Today&apos;s Fix</div>
@@ -163,7 +163,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Revise */}
-          <div className="rounded-2xl p-5" style={{ background: 'rgba(240,253,244,0.9)', border: '1.5px solid rgba(34,197,94,0.3)', backdropFilter: 'blur(12px)' }}>
+          <div className="rounded-2xl p-5 flex flex-col justify-center" style={{ background: 'rgba(240,253,244,0.9)', border: '1.5px solid rgba(34,197,94,0.3)', backdropFilter: 'blur(12px)' }}>
             <div className="flex justify-between items-start gap-3">
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-bold mb-1" style={{ color: COLORS.strong }}>🔄 Revise</div>
@@ -195,46 +195,6 @@ export default function DashboardPage() {
               )}
             </div>
           </div>
-        </div>
-
-        {/* ── Curiosity + progress entry ── */}
-        <div className="grid grid-cols-2 gap-4 flex-1">
-          <div className="rounded-2xl p-5" style={{ background: 'rgba(79,70,229,0.07)', border: '1px solid rgba(79,70,229,0.2)', backdropFilter: 'blur(12px)' }}>
-            <div className="text-xs font-bold mb-3" style={{ color: '#78716c' }}>Did you know? 🤯</div>
-            <p className="font-bold text-lg leading-snug" style={{ color: '#1c1917' }}>
-              A single strand of DNA from one human cell, uncoiled, would stretch about 2 metres.
-            </p>
-            <p className="text-sm mt-3 italic" style={{ color: COLORS.indigo }}>
-              If every cell has the same DNA, why do skin cells look nothing like neurons?
-            </p>
-            <div className="mt-4 flex justify-end">
-              <Link href="/brain-map" className="text-xs font-bold px-3 py-1 rounded-lg transition-colors hover:bg-white/60" style={{ color: COLORS.indigo, border: `1px solid ${COLORS.indigo}44` }}>
-                Open Brain Map →
-              </Link>
-            </div>
-          </div>
-
-          {/* My Progress entry */}
-          <Link
-            href="/progress"
-            className="rounded-2xl p-5 flex flex-col justify-between transition-all hover:opacity-90 group"
-            style={{ background: 'rgba(255,255,255,0.65)', border: '1px solid rgba(0,0,0,0.08)', backdropFilter: 'blur(12px)' }}
-          >
-            <div>
-              <div className="text-xs font-bold mb-3" style={{ color: '#78716c' }}>Your journey 📈</div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-4xl font-extrabold" style={{ color: COLORS.strong }}>{m?.strong ?? 0}</span>
-                <span className="text-sm" style={{ color: '#78716c' }}>concepts mastered</span>
-              </div>
-              <p className="text-sm mt-2" style={{ color: '#44403c' }}>
-                {dash?.streak.activeDays ?? 0} active days in the last month · {dash?.streak.best ?? 0}-day best streak.
-              </p>
-            </div>
-            <div className="flex justify-between items-center mt-4">
-              <span className="text-lg font-extrabold group-hover:underline" style={{ color: '#1c1917' }}>See My Progress →</span>
-              <span className="text-2xl">🧠</span>
-            </div>
-          </Link>
         </div>
 
         {loading && (
