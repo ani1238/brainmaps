@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { loginUser, requestCallback } from '@/lib/api';
-import { saveAuthToken, saveProfileFromLearner } from '@/lib/storage';
+import { saveTokens, saveProfileFromLearner } from '@/lib/storage';
 
 // ─── Marketing hook slides (left panel) ───────────────────────────────────────
 
@@ -103,7 +103,7 @@ export default function LoginPage() {
     setLoginError('');
     try {
       const auth = await loginUser(id.toLowerCase(), password);
-      saveAuthToken(auth.token);
+      saveTokens(auth.token, auth.refreshToken);
       saveProfileFromLearner(auth);
       router.push('/dashboard');
     } catch (err) {
@@ -246,7 +246,7 @@ export default function LoginPage() {
               <button className="btn-login" type="submit" disabled={loggingIn}>
                 {loggingIn ? 'Logging in…' : 'Log in'}
               </button>
-              <a href="#" className="forgot" onClick={(e) => e.preventDefault()}>
+              <a href="/forgot" className="forgot">
                 Forgot password?
               </a>
             </form>

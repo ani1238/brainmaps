@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GridBackground } from '@/components/GridBackground';
 import { registerUser } from '@/lib/api';
-import { saveAuthToken, saveProfileFromLearner } from '@/lib/storage';
+import { saveTokens, saveProfileFromLearner } from '@/lib/storage';
 
 const GRADES = [3, 4, 5, 6, 7] as const;
 const BOARDS = ['CBSE', 'ICSE'] as const;
@@ -39,7 +39,7 @@ export default function RegisterPage() {
         grade,
         board,
       );
-      saveAuthToken(auth.token);
+      saveTokens(auth.token, auth.refreshToken);
       saveProfileFromLearner(auth);
       router.push('/dashboard');
     } catch (err) {
