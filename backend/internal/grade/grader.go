@@ -387,34 +387,20 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 		      updated_at      = now()
 	`, studentID, conceptID, ema, state)
 
-	// Per-tag accuracy this session, the student's active weaknesses BEFORE any
-	// lifecycle updates, and whether this attempt is a retry — together they
-	// feed the tag-gated pass decision.
+	// Per-tag accuracy this session feeds the weak-concept lifecycle below.
 	tested := sessionTagStats(ctx, sessionID)
-	activeBefore := activeWeakTags(ctx, studentID, conceptID)
-	targeted := map[string]tagStat{}
-	for _, tag := range activeBefore {
-		if st, ok := tested[tag]; ok {
-			targeted[tag] = st
-		}
-	}
 
 	curCol := stationStateCol(models.StationKey(station))
-	isRetry := false
-	if curCol != "" {
-		var st string
-		if db.Pool.QueryRow(ctx, fmt.Sprintf(
-			`SELECT %s FROM concept_progress WHERE student_id = $1 AND concept_id = $2`, curCol,
-		), studentID, conceptID).Scan(&st) == nil {
-			isRetry = st == "needs_fixing"
-		}
-	}
 
-	// Update per-station state based on outcome. A retry must also demonstrate
-	// every targeted weak tag (>= 50% of its questions) — score alone can't pass.
+	// Update per-station state based on outcome. Progression is governed purely
+	// by the session score: meeting the unlock threshold clears the station and
+	// unlocks the next one, on first attempts and retries alike. Specific weak
+	// sub-skills are still tracked and resurfaced via the weak-concept lifecycle
+	// / Today's Fix below, so a student who clears the threshold keeps getting
+	// targeted practice without being hard-blocked from advancing.
 	stationPassed := false
 	if curCol != "" {
-		stationPassed = levelPassGate(sessionScore, isRetry, targeted)
+		stationPassed = levelPassGate(sessionScore)
 		if stationPassed {
 			// Passed: mark current station done and unlock the next one
 			nextSt := nextStationKey(models.StationKey(station))
@@ -552,24 +538,13 @@ type tagStat struct{ Total, Correct int }
 // at least half of its questions answered correctly.
 func (t tagStat) passed() bool { return t.Total > 0 && t.Correct*2 >= t.Total }
 
-// levelPassGate decides whether a session clears its station. Score must meet
-// the unlock threshold; on a retry, every targeted weak tag must also have
-// passed. First attempts have no targeted tags, so the gate degenerates to
-// score-only by construction.
-func levelPassGate(score float64, isRetry bool, targeted map[string]tagStat) bool {
+// levelPassGate decides whether a session clears its station: the score must
+// meet the unlock threshold. Progression is score-based on both first attempts
+// and retries — weak sub-skills are remediated separately via the weak-concept
+// lifecycle (Today's Fix), not by hard-blocking advancement here.
+func levelPassGate(score float64) bool {
 	const unlockThreshold = 0.60
-	if score < unlockThreshold {
-		return false
-	}
-	if !isRetry {
-		return true
-	}
-	for _, st := range targeted {
-		if !st.passed() {
-			return false
-		}
-	}
-	return true
+	return score >= unlockThreshold
 }
 
 // decideTagLifecycle splits a session's outcome into tags to mark wrong and
@@ -619,29 +594,6 @@ func sessionTagStats(ctx context.Context, sessionID string) map[string]tagStat {
 		}
 	}
 	return stats
-}
-
-// activeWeakTags returns the student's active weak tags for a concept, ranked
-// worst-first. Keep the ordering in sync with activeTagsRanked in the handlers
-// package, which drives retry question selection.
-func activeWeakTags(ctx context.Context, studentID, conceptID string) []string {
-	rows, err := db.Pool.Query(ctx, `
-		SELECT tag FROM student_weak_concepts
-		WHERE student_id = $1 AND concept_id = $2 AND status = 'active'
-		ORDER BY wrong_count DESC, last_seen_at DESC
-	`, studentID, conceptID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var tags []string
-	for rows.Next() {
-		var t string
-		if rows.Scan(&t) == nil {
-			tags = append(tags, t)
-		}
-	}
-	return tags
 }
 
 // sessionWeakSet builds the session's weakness set: the AI's weak-concept tags

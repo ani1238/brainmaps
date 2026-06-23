@@ -377,7 +377,10 @@ function SharpenContent() {
   if (finished) {
     // Use API result if available; fall back to local MCQ tally
     const sessionScore = apiResult?.score ?? (mcqCount > 0 ? correctCount / mcqCount : 0);
-    const passed = apiResult ? apiResult.passed : sessionScore >= 0.8;
+    // When a graded API session exists, its pass decision governs. The local
+    // fallback (demo concepts / API hiccup) mirrors the backend's 60% unlock
+    // threshold so a passing score is never wrongly held back.
+    const passed = apiResult ? apiResult.passed : sessionScore >= 0.6;
     const pct = Math.round(sessionScore * 100);
     const aiStillGrading = apiResult?.aiGrading ?? false;
 
