@@ -7,7 +7,7 @@ import { GridBackground } from './GridBackground';
 import { RightPanel } from './RightPanel';
 import type { Concept } from '@/types';
 import { CONCEPT_DATA, CONCEPT_BY_ID, ENGLISH_TRACKS } from '@/data/dummy';
-import { fetchChapters, fetchConcept, fetchConcepts, type ApiChapter, type ApiConceptDetail } from '@/lib/api';
+import { fetchChapters, fetchConcept, fetchConcepts, fetchToday, type ApiChapter, type ApiConceptDetail } from '@/lib/api';
 import { assessmentHref } from '@/lib/navigation';
 
 type MapLevel = 'subject' | 'chapter' | 'concept' | 'english';
@@ -49,14 +49,45 @@ function apiDetailToConcept(c: ApiConceptDetail): Concept {
 
 export function BrainMap({ width = 1200, height = 900 }: { width?: number; height?: number }) {
   const router = useRouter();
-  const [level, setLevel] = useState<MapLevel>('subject');
-  const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+
+  // Deep-link target: arriving with ?subject=<key> (e.g. from the Today page
+  // subject strip) starts the map inside that subject instead of the picker.
+  // A ?conceptId= deep-link takes precedence and is restored in the effect below.
+  const initialSubjectMeta =
+    !searchParams.get('conceptId') && searchParams.get('subject')
+      ? SUBJECTS.find(s => s.key === searchParams.get('subject'))
+      : undefined;
+  const initialIsEnglish = initialSubjectMeta?.key === 'english';
+
+  const [level, setLevel] = useState<MapLevel>(
+    initialSubjectMeta ? (initialIsEnglish ? 'english' : 'chapter') : 'subject',
+  );
+  const [selectedSubject, setSelectedSubject] = useState<string | null>(
+    initialSubjectMeta ? initialSubjectMeta.key : null,
+  );
   const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
-  const [breadcrumb, setBreadcrumb] = useState<BreadcrumbEntry[]>([]);
+  const [breadcrumb, setBreadcrumb] = useState<BreadcrumbEntry[]>(
+    initialSubjectMeta
+      ? [{
+          level: 'subject',
+          label: initialIsEnglish ? 'English' : initialSubjectMeta.label,
+          key: initialSubjectMeta.key,
+        }]
+      : [],
+  );
   const [selectedConcept, setSelectedConcept] = useState<Concept | null>(null);
   const [animKey, setAnimKey] = useState(0);
   const [showPanel, setShowPanel] = useState(false);
   const [chapters, setChapters] = useState<ApiChapter[]>([]);
+
+  // Live Today's-Fix / Revise queue counts for the bottom CTAs.
+  const [queueCounts, setQueueCounts] = useState<{ fix: number; revise: number }>({ fix: 0, revise: 0 });
+  useEffect(() => {
+    fetchToday()
+      .then(t => setQueueCounts({ fix: t.fixQueue.length, revise: t.reviseQueue.length }))
+      .catch(() => {});
+  }, []);
 
   const cy = height / 2 - 20;
 
@@ -131,10 +162,18 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
   // Restore the subject → chapter → concept path when arriving with ?conceptId=
   // (e.g. returning from a question session). Runs once on mount.
-  const searchParams = useSearchParams();
   useEffect(() => {
     const conceptId = searchParams.get('conceptId');
-    if (!conceptId) return;
+    if (!conceptId) {
+      // ?subject=<key> deep-link: initial level/subject/breadcrumb are seeded
+      // from the URL via lazy state above; here we just load its chapters.
+      if (initialSubjectMeta && !initialIsEnglish) {
+        fetchChapters(initialSubjectMeta.key)
+          .then(data => setChapters(data))
+          .catch(() => setChapters([]));
+      }
+      return;
+    }
 
     function restore(subjectKey: string, chapterId: string, chapterLabel: string, concept: Concept) {
       const subjectMeta = SUBJECTS.find(s => s.key === subjectKey);
@@ -338,7 +377,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
           className="flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold text-sm text-white transition-all hover:opacity-90 active:scale-[0.98]"
           style={{ background: '#f97316', boxShadow: '0 4px 20px rgba(249,115,22,0.35)' }}
         >
-          ✨ Fix 5 tricky bits
+          🔧 Today&apos;s Fix · {queueCounts.fix}
         </button>
         <button
           onClick={() => router.push('/recall')}
@@ -350,7 +389,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
             backdropFilter: 'blur(8px)',
           }}
         >
-          🎯 Test myself · 3
+          🔄 Revise · {queueCounts.revise}
         </button>
       </div>
 
