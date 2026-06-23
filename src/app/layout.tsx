@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import { Plus_Jakarta_Sans, JetBrains_Mono, Inter, Playfair_Display } from "next/font/google";
 import { AuthGate } from "@/components/AuthGate";
 import "./globals.css";
 
@@ -15,6 +15,19 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono",
 });
 
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-inter",
+});
+
+const playfair = Playfair_Display({
+  subsets: ["latin"],
+  weight: ["600", "700"],
+  style: ["normal", "italic"],
+  variable: "--font-playfair",
+});
+
 export const metadata: Metadata = {
   title: "BrainMaps — Premium Learning for Classes 3–7",
   description: "Spaced-repetition assessment engine for CBSE/ICSE students",
@@ -26,7 +39,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${plusJakarta.variable} ${jetbrainsMono.variable} h-full`}>
+    <html lang="en" className={`${plusJakarta.variable} ${jetbrainsMono.variable} ${inter.variable} ${playfair.variable} h-full`}>
       <body className="min-h-full" style={{ fontFamily: "var(--font-jakarta), system-ui, sans-serif" }}>
         <AuthGate>{children}</AuthGate>
       </body>

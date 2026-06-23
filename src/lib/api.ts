@@ -107,6 +107,33 @@ export async function addStudentToHousehold(
   return res.json();
 }
 
+// ─── Lead capture (enroll callback request from the login screen) ─────────────
+
+export interface CallbackRequestResult {
+  ok: boolean;
+}
+
+/**
+ * Submits a "request a call" lead from the login/enroll form.
+ *
+ * The backend `/leads` endpoint is added in Phase 2. Until it ships, a 404/501
+ * is treated as a soft success so the MVP enroll form still confirms to the
+ * parent (the optimistic UX in the design mock). Network errors still reject.
+ */
+export async function requestCallback(
+  phone: string,
+): Promise<CallbackRequestResult> {
+  const res = await fetch(`${API_BASE}/leads`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, source: 'login_enroll' }),
+  });
+  if (res.ok) return { ok: true };
+  // Endpoint not yet deployed — don't block the parent on a missing route.
+  if (res.status === 404 || res.status === 501) return { ok: true };
+  throw new Error(await res.text());
+}
+
 // ─── Legacy shape (kept for type compatibility) ───────────────────────────────
 
 export interface ApiStudent {
