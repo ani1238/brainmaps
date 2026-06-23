@@ -13,8 +13,6 @@ import {
 
 type Phase = 'loading' | 'create-pin' | 'enter-pin' | 'report';
 
-const SESSION_KEY = 'bm_parent_unlocked';
-
 export default function ParentReportPage() {
   const [phase, setPhase] = useState<Phase>('loading');
   const [pin, setPin] = useState('');
@@ -31,10 +29,8 @@ export default function ParentReportPage() {
       const r = await fetchParentReport(p);
       setReport(r);
       setPhase('report');
-      sessionStorage.setItem(SESSION_KEY, p);
     } catch {
       setError('Incorrect PIN. Please try again.');
-      sessionStorage.removeItem(SESSION_KEY);
     } finally {
       setBusy(false);
     }
@@ -49,15 +45,11 @@ export default function ParentReportPage() {
           setPhase('create-pin');
           return;
         }
-        const cached = sessionStorage.getItem(SESSION_KEY);
-        if (cached) {
-          loadReport(cached);
-        } else {
-          setPhase('enter-pin');
-        }
+        // Always require the PIN on each visit — never persist unlocked state.
+        setPhase('enter-pin');
       })
       .catch(() => setPhase('enter-pin'));
-  }, [loadReport]);
+  }, []);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -151,7 +143,7 @@ export default function ParentReportPage() {
         )}
 
         {phase === 'report' && report && (
-          <ReportView report={report} onLock={() => { sessionStorage.removeItem(SESSION_KEY); setPin(''); setReport(null); setPhase('enter-pin'); }} />
+          <ReportView report={report} onLock={() => { setPin(''); setReport(null); setPhase('enter-pin'); }} />
         )}
       </main>
     </div>
