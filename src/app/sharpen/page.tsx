@@ -662,7 +662,6 @@ function SharpenContent() {
               current={currentIdx}
               total={questions.length}
               onNext={handleNext}
-              onSkip={handleNext}
               onAnswer={handleAnswer}
               onSubmitAnswer={handleSubmitAnswer}
               deferAnswerFeedback={questionsFromApi}

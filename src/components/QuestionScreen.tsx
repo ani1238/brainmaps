@@ -19,7 +19,6 @@ interface QuestionScreenProps {
   current: number;
   total: number;
   onNext: () => void;
-  onSkip?: () => void;
   onAnswer?: (correct: boolean) => void;
   onSubmitAnswer?: (payload: AnswerPayload) => void;
   deferAnswerFeedback?: boolean;
@@ -34,7 +33,6 @@ export function QuestionScreen({
   current,
   total,
   onNext,
-  onSkip,
   onAnswer,
   onSubmitAnswer,
   deferAnswerFeedback = false,
@@ -80,21 +78,6 @@ export function QuestionScreen({
               return <GenericTextQuestion key={question.id} question={question} onNext={onNext} onSubmitAnswer={onSubmitAnswer} />;
           }
         })()}
-      </div>
-
-      {/* Footer */}
-      <div
-        className="flex-shrink-0 flex justify-between items-center px-5 py-4"
-        style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}
-      >
-        <button
-          onClick={onSkip}
-          className="text-sm font-mono transition-opacity hover:opacity-70"
-          style={{ color: '#78716c' }}
-        >
-          skip
-        </button>
-        <div />
       </div>
     </div>
   );
@@ -242,10 +225,11 @@ function MCQQuestion({ question, onNext, onAnswer, onSubmitAnswer, deferAnswerFe
 
       <button
         onClick={handleAction}
-        className="py-3 rounded-xl font-bold text-sm text-white transition-all hover:opacity-90 active:scale-[0.98] mt-2"
+        disabled={!revealed}
+        className="py-3 rounded-xl font-bold text-sm text-white transition-all hover:opacity-90 active:scale-[0.98] mt-2 disabled:opacity-40 disabled:cursor-default"
         style={{ background: '#4F46E5' }}
       >
-        {revealed ? '→ Next' : selected ? 'Submit' : 'Skip'}
+        {revealed ? '→ Next' : 'Pick an answer'}
       </button>
     </div>
   );
