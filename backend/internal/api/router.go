@@ -43,6 +43,11 @@ func NewRouter() http.Handler {
 			// Authenticated learner profile (class + board + 1:1 student id)
 			r.Get("/auth/me", handlers.Me)
 
+			// Parent report (PIN-gated)
+			r.Post("/auth/parent-pin", handlers.SetParentPin)
+			r.Get("/report/status", handlers.ReportStatus)
+			r.Post("/report", handlers.GetParentReport)
+
 			// Curriculum (no student required)
 			r.Get("/chapters", handlers.GetChapters)
 			r.Get("/concepts", handlers.GetConcepts)
