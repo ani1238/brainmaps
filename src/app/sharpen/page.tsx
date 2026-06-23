@@ -163,6 +163,77 @@ const NEXT_LEVEL: Partial<Record<QuestionLevel, QuestionLevel>> = {
   strengthen: 'revise',
 };
 
+// ── In-progress attempt persistence ───────────────────────────────────────────
+// Persist an in-flight level attempt to localStorage so a browser reload or
+// back/forward navigation resumes where the student left off instead of
+// restarting the level with a brand-new question set. Answers are buffered
+// client-side and only sent to the API on completion, so reusing the saved
+// session is safe. No DB involved.
+const ATTEMPT_PREFIX = 'bm_attempt_v1:';
+const ATTEMPT_TTL_MS = 3 * 60 * 60 * 1000; // discard attempts older than 3h
+
+interface SavedAttempt {
+  conceptId: string;
+  level: string;
+  questions: Question[];
+  questionsFromApi: boolean;
+  session: ActiveSession | null;
+  currentIdx: number;
+  answers: SubmitAnswer[];
+  correctCount: number;
+  mcqCount: number;
+  savedAt: number;
+}
+
+function attemptKey(conceptId: string, level: string): string {
+  return `${ATTEMPT_PREFIX}${conceptId}:${level}`;
+}
+
+function saveAttempt(a: Omit<SavedAttempt, 'savedAt'>): void {
+  try {
+    localStorage.setItem(
+      attemptKey(a.conceptId, a.level),
+      JSON.stringify({ ...a, savedAt: Date.now() }),
+    );
+  } catch {
+    // Storage unavailable or full — persistence is best-effort, never fatal.
+  }
+}
+
+function loadAttempt(conceptId: string, level: string): SavedAttempt | null {
+  try {
+    const raw = localStorage.getItem(attemptKey(conceptId, level));
+    if (!raw) return null;
+    const a = JSON.parse(raw) as SavedAttempt;
+    const valid =
+      a &&
+      a.conceptId === conceptId &&
+      a.level === level &&
+      Array.isArray(a.questions) &&
+      a.questions.length > 0 &&
+      typeof a.savedAt === 'number' &&
+      Date.now() - a.savedAt <= ATTEMPT_TTL_MS &&
+      a.currentIdx >= 0 &&
+      a.currentIdx < a.questions.length;
+    if (!valid) {
+      localStorage.removeItem(attemptKey(conceptId, level));
+      return null;
+    }
+    return a;
+  } catch {
+    return null;
+  }
+}
+
+function clearAttempt(conceptId: string | null, level: string | null): void {
+  if (!conceptId || !level) return;
+  try {
+    localStorage.removeItem(attemptKey(conceptId, level));
+  } catch {
+    // ignore
+  }
+}
+
 function SharpenContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -252,20 +323,48 @@ function SharpenContent() {
 
     if (!level || !conceptId) return;
 
-    // Always try the DB first. If it has questions, use them and start a
-    //    graded session. Otherwise keep whatever local fallback we have.
-    fetchQuestions(conceptId, level)
-      .then(apiQs => {
+    let cancelled = false;
+    (async () => {
+      // Resume an attempt left in progress before a reload / back navigation.
+      const saved = loadAttempt(conceptId, level);
+      if (saved) {
+        if (cancelled) return;
+        setQuestions(saved.questions);
+        setQuestionsFromApi(saved.questionsFromApi);
+        sessionRef.current = saved.session;
+        collectedAnswers.current = saved.answers;
+        setCurrentIdx(saved.currentIdx);
+        setCorrectCount(saved.correctCount);
+        setMcqCount(saved.mcqCount);
+        setLoadingQuestions(false);
+        return;
+      }
+
+      // Otherwise try the DB first. If it has questions, use them and start a
+      // graded session. Otherwise keep whatever local fallback we have.
+      try {
+        const apiQs = await fetchQuestions(conceptId, level);
+        if (cancelled) return;
         if (apiQs.length > 0) {
           setQuestions(apiQs);
           setQuestionsFromApi(true);
-          return startSession(conceptId, level);
+          const session = await startSession(conceptId, level);
+          if (cancelled) return;
+          sessionRef.current = session;
+          // Persist the fresh attempt so a reload resumes it instead of
+          // starting over with a different adaptive set.
+          saveAttempt({
+            conceptId, level, questions: apiQs, questionsFromApi: true,
+            session, currentIdx: 0, answers: [], correctCount: 0, mcqCount: 0,
+          });
         }
-        return null;
-      })
-      .then(session => { if (session) sessionRef.current = session; })
-      .catch(() => {})
-      .finally(() => setLoadingQuestions(false));
+      } catch {
+        // Network/API failure — keep whatever local fallback we have.
+      } finally {
+        if (!cancelled) setLoadingQuestions(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [conceptId, level]);
 
   // Stop polling on unmount
@@ -287,11 +386,24 @@ function SharpenContent() {
 
   async function handleNext() {
     if (currentIdx < questions.length - 1) {
-      setCurrentIdx(i => i + 1);
+      const nextIdx = currentIdx + 1;
+      setCurrentIdx(nextIdx);
+      // Persist progress so a reload / back resumes at this question. The
+      // answer for the question just left was already buffered above.
+      if (questionsFromApi && conceptId && level) {
+        saveAttempt({
+          conceptId, level, questions, questionsFromApi,
+          session: sessionRef.current,
+          currentIdx: nextIdx, answers: collectedAnswers.current,
+          correctCount, mcqCount,
+        });
+      }
       return;
     }
 
-    // Last question — submit session to API only if questions came from DB
+    // Last question — the attempt is finished; drop the saved progress so a
+    // reload doesn't try to resume a completed attempt.
+    clearAttempt(conceptId, level);
     setFinished(true);
     if (questionsFromApi && sessionRef.current) {
       try {
@@ -340,10 +452,18 @@ function SharpenContent() {
     if (questionsFromApi && level && conceptId) {
       setLoadingQuestions(true);
       setQuestions([]);
+      clearAttempt(conceptId, level);
       try {
         const nextQuestions = await fetchQuestions(conceptId, level, excludeQuestionIds);
-        setQuestions(nextQuestions.length > 0 ? nextQuestions : previousQuestions);
-        sessionRef.current = await startSession(conceptId, level);
+        const resolved = nextQuestions.length > 0 ? nextQuestions : previousQuestions;
+        setQuestions(resolved);
+        const session = await startSession(conceptId, level);
+        sessionRef.current = session;
+        // Persist the fresh retry attempt so a reload resumes it too.
+        saveAttempt({
+          conceptId, level, questions: resolved, questionsFromApi: true,
+          session, currentIdx: 0, answers: [], correctCount: 0, mcqCount: 0,
+        });
       } catch {
         setQuestions(previousQuestions);
         startSession(conceptId, level)
