@@ -41,6 +41,22 @@ export default function ProgressPage() {
           <p className="text-sm mt-1" style={{ color: '#78716c' }}>Everything you&apos;ve been building, in one place.</p>
         </div>
 
+        {/* ── Parent report entry (PIN-gated) ── */}
+        <Link
+          href="/report"
+          className="rounded-2xl p-5 flex items-center justify-between gap-4 transition-all hover:opacity-90"
+          style={{ background: 'rgba(79,70,229,0.07)', border: '1px solid rgba(79,70,229,0.25)', backdropFilter: 'blur(12px)' }}
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-2xl">🔒</span>
+            <div className="min-w-0">
+              <div className="font-bold text-base" style={{ color: '#1c1917' }}>Parent Report</div>
+              <div className="text-xs" style={{ color: '#78716c' }}>An AI summary of effort, progress &amp; what to focus on — PIN-protected for you.</div>
+            </div>
+          </div>
+          <span className="text-lg font-extrabold flex-shrink-0" style={{ color: COLORS.indigo }}>→</span>
+        </Link>
+
         {/* ── Streak card ── */}
         <section
           className="rounded-2xl p-5 lg:p-6 flex flex-wrap items-center gap-4 lg:gap-5"

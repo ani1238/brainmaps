@@ -201,6 +201,49 @@ export async function fetchMe(): Promise<LearnerProfile> {
   return res.json();
 }
 
+// ─── Parent report (PIN-gated) ────────────────────────────────────────────────
+
+export interface ParentReport {
+  studentName: string;
+  weekStart: string;
+  weekEnd: string;
+  narrative: string;
+  suggestion: string;
+  effort: { sessions: number; activeDays: number; streak: number; minutes: number };
+  mastery: { strong: number; developing: number; weak: number; total: number };
+  improving: { name: string; delta: number }[];
+  focusAreas: { concept: string; tags: string[] }[];
+}
+
+/** Whether a parent PIN has been set (controls create-vs-enter UI). */
+export async function getReportStatus(): Promise<{ pinSet: boolean }> {
+  const res = await authedFetch(`${API_BASE}/report/status`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** Sets or changes the parent PIN (currentPin required when changing). */
+export async function setParentPin(pin: string, currentPin?: string): Promise<void> {
+  const res = await authedFetch(`${API_BASE}/auth/parent-pin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin, currentPin: currentPin ?? '' }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+/** Verifies the PIN and returns today's (cached) parent report. */
+export async function fetchParentReport(pin: string): Promise<ParentReport> {
+  const res = await authedFetch(`${API_BASE}/report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+
 // ─── Lead capture (enroll callback request from the login screen) ─────────────
 
 export interface CallbackRequestResult {
