@@ -33,6 +33,9 @@ func NewRouter() http.Handler {
 		r.Post("/auth/forgot", handlers.ForgotPassword)  // request a reset link
 		r.Post("/auth/reset", handlers.ResetPassword)    // consume reset token
 
+		// ── Public: enrollment lead capture (login/enroll form) ───────────────
+		r.Post("/leads", handlers.CreateLead)
+
 		// ── Protected: all data routes require a valid user session ──────────
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.RequireAuth)
