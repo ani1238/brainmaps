@@ -181,6 +181,13 @@ export function RightPanel({
     }
   }
 
+  // Open the previous-reports page for a station (its past graded attempts).
+  function viewReports(key: StationKey) {
+    const level = STATION_TO_LEVEL[key];
+    const returnTo = `/brain-map?conceptId=${concept.id}`;
+    router.push(`/reports?conceptId=${concept.id}&level=${level}&returnTo=${encodeURIComponent(returnTo)}`);
+  }
+
   return (
     <div
       className="absolute right-0 left-0 sm:left-auto top-0 bottom-0 w-full sm:w-[420px] flex flex-col animate-slide-in-right"
@@ -252,6 +259,7 @@ export function RightPanel({
           loading={loadingQ}
           reviseSchedule={concept.reviseSchedule}
           onStart={() => startStation(activeTab)}
+          onViewReports={() => viewReports(activeTab)}
         />
       </div>
     </div>
@@ -260,13 +268,14 @@ export function RightPanel({
 
 // ─── A single station's panel ─────────────────────────────────────────────────
 
-function StationTab({ stationKey, status, questions, loading, reviseSchedule, onStart }: {
+function StationTab({ stationKey, status, questions, loading, reviseSchedule, onStart, onViewReports }: {
   stationKey: StationKey;
   status: StationStatus;
   questions: { type: string }[];
   loading?: boolean;
   reviseSchedule?: Concept['reviseSchedule'];
   onStart: () => void;
+  onViewReports: () => void;
 }) {
   const number = STATION_NUMBERS[stationKey];
   const label = STATION_LABELS[stationKey];
@@ -383,6 +392,24 @@ function StationTab({ stationKey, status, questions, loading, reviseSchedule, on
           style={{ background: 'rgba(0,0,0,0.03)', color: '#a8a29e', border: '1px dashed rgba(0,0,0,0.12)' }}
         >
           🔒 {info.lockedHint}
+        </div>
+      ) : isDone && stationKey !== 'keep_it_fresh' ? (
+        // Passed level → revise it again or browse previous reports
+        <div className="flex flex-col gap-2.5">
+          <button
+            onClick={onStart}
+            className="w-full py-3 rounded-xl font-bold text-sm text-white transition-all active:scale-[0.98]"
+            style={{ background: '#16a34a', boxShadow: `0 4px 16px ${COLORS.strong}40` }}
+          >
+            🔁 Revise {label}
+          </button>
+          <button
+            onClick={onViewReports}
+            className="w-full py-3 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
+            style={{ background: 'rgba(79,70,229,0.08)', color: COLORS.indigo, border: `1px solid ${COLORS.indigo}30` }}
+          >
+            📄 Previous reports
+          </button>
         </div>
       ) : (
         <button
