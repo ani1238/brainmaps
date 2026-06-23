@@ -275,7 +275,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
             <h1 className="text-2xl font-extrabold" style={{ color: '#1c1917' }}>Pick a subject to explore!</h1>
           </div>
           <div className="text-xs" style={{ color: '#78716c' }}>
-            6 subjects · 3 due to check
+            {SUBJECTS.length} {SUBJECTS.length === 1 ? 'subject' : 'subjects'} · {queueCounts.revise} due to check
           </div>
         </div>
       )}
