@@ -4,20 +4,25 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GridBackground } from '@/components/GridBackground';
-import { registerHousehold } from '@/lib/api';
-import { saveAuthToken } from '@/lib/storage';
+import { registerUser } from '@/lib/api';
+import { saveAuthToken, saveProfileFromLearner } from '@/lib/storage';
+
+const GRADES = [3, 4, 5, 6, 7] as const;
+const BOARDS = ['CBSE', 'ICSE'] as const;
 
 export default function RegisterPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const [grade, setGrade] = useState<number>(6);
+  const [board, setBoard] = useState<'CBSE' | 'ICSE'>('CBSE');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const canSubmit =
     email.includes('@') &&
-    displayName.trim().length >= 2 &&
+    name.trim().length >= 2 &&
     password.length >= 8 &&
     !loading;
 
@@ -27,14 +32,16 @@ export default function RegisterPage() {
     setLoading(true);
     setError('');
     try {
-      const auth = await registerHousehold(
+      const auth = await registerUser(
         email.trim().toLowerCase(),
-        displayName.trim(),
+        name.trim(),
         password,
+        grade,
+        board,
       );
       saveAuthToken(auth.token);
-      // After registration, add the first student.
-      router.push('/students');
+      saveProfileFromLearner(auth);
+      router.push('/dashboard');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Registration failed.';
       setError(msg.includes('already') ? 'That email is already registered.' : msg);
@@ -90,41 +97,74 @@ export default function RegisterPage() {
             CREATE ACCOUNT
           </div>
           <h1 className="text-3xl font-extrabold mb-2" style={{ color: '#1c1917' }}>
-            Set up your household.
+            Start learning.
           </h1>
           <p className="text-sm leading-relaxed mb-8" style={{ color: '#78716c' }}>
-            One account per family. You can add multiple children after signing up.
+            Tell us your class and board — you&apos;ll go straight into your curriculum.
           </p>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
             <div>
               <label className="block text-[10px] font-bold tracking-widest mb-2" style={{ color: '#78716c' }}>
-                PARENT / GUARDIAN EMAIL
+                FULL NAME
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="e.g. Aarav Sharma"
+                autoComplete="name"
+                className="w-full px-4 py-3.5 rounded-xl text-base font-semibold outline-none transition-all"
+                style={fieldStyle(name.trim().length >= 2)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold tracking-widest mb-2" style={{ color: '#78716c' }}>
+                EMAIL
               </label>
               <input
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="parent@example.com"
+                placeholder="you@example.com"
                 autoComplete="email"
                 className="w-full px-4 py-3.5 rounded-xl text-base font-semibold outline-none transition-all"
                 style={fieldStyle(email.includes('@'))}
               />
             </div>
 
-            <div>
-              <label className="block text-[10px] font-bold tracking-widest mb-2" style={{ color: '#78716c' }}>
-                YOUR NAME
-              </label>
-              <input
-                type="text"
-                value={displayName}
-                onChange={e => setDisplayName(e.target.value)}
-                placeholder="e.g. Priya Sharma"
-                autoComplete="name"
-                className="w-full px-4 py-3.5 rounded-xl text-base font-semibold outline-none transition-all"
-                style={fieldStyle(displayName.trim().length >= 2)}
-              />
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <label className="block text-[10px] font-bold tracking-widest mb-2" style={{ color: '#78716c' }}>
+                  CLASS
+                </label>
+                <select
+                  value={grade}
+                  onChange={e => setGrade(Number(e.target.value))}
+                  className="w-full px-4 py-3.5 rounded-xl text-base font-semibold outline-none transition-all appearance-none cursor-pointer"
+                  style={fieldStyle(true)}
+                >
+                  {GRADES.map(g => (
+                    <option key={g} value={g}>Class {g}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1">
+                <label className="block text-[10px] font-bold tracking-widest mb-2" style={{ color: '#78716c' }}>
+                  BOARD
+                </label>
+                <select
+                  value={board}
+                  onChange={e => setBoard(e.target.value as 'CBSE' | 'ICSE')}
+                  className="w-full px-4 py-3.5 rounded-xl text-base font-semibold outline-none transition-all appearance-none cursor-pointer"
+                  style={fieldStyle(true)}
+                >
+                  {BOARDS.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div>

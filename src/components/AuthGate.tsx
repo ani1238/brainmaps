@@ -1,14 +1,12 @@
 'use client';
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { useProfile, getAuthToken } from '@/lib/storage';
+import { useProfile, getAuthToken, saveProfileFromLearner, clearAuthToken } from '@/lib/storage';
+import { fetchMe } from '@/lib/api';
 
 // Public routes that never require auth.
 const PUBLIC_PATHS = new Set(['/', '/register']);
-
-// Routes that need a valid household token but no specific student yet.
-const TOKEN_ONLY_PATHS = new Set(['/students']);
 
 function subscribeHydration() {
   return () => {};
@@ -19,9 +17,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const profile = useProfile();
   const hydrated = useSyncExternalStore(subscribeHydration, () => true, () => false);
+  const rehydrating = useRef(false);
 
   const isPublic = PUBLIC_PATHS.has(pathname);
-  const isTokenOnly = TOKEN_ONLY_PATHS.has(pathname);
 
   useEffect(() => {
     if (!hydrated || isPublic) return;
@@ -32,18 +30,27 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Protected data pages also require an active student profile.
-    if (!isTokenOnly && profile === null) {
-      router.replace('/students');
+    // Token but no local profile (e.g. a fresh device): rehydrate from the API.
+    if (profile === null && !rehydrating.current) {
+      rehydrating.current = true;
+      fetchMe()
+        .then(learner => saveProfileFromLearner(learner))
+        .catch(() => {
+          clearAuthToken();
+          router.replace('/');
+        })
+        .finally(() => {
+          rehydrating.current = false;
+        });
     }
-  }, [hydrated, isPublic, isTokenOnly, profile, router]);
+  }, [hydrated, isPublic, profile, router]);
 
   if (isPublic) return <>{children}</>;
   if (!hydrated) return null;
 
   const token = getAuthToken();
   if (!token) return null;
-  if (!isTokenOnly && profile === null) return null;
+  if (profile === null) return null; // waiting on rehydration
 
   return <>{children}</>;
 }

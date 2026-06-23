@@ -41,6 +41,30 @@ export function saveProfile(profile: StudentProfile): void {
   window.dispatchEvent(new Event(PROFILE_EVENT));
 }
 
+// Builds and persists a StudentProfile from the authenticated learner response
+// (register / login / /auth/me). Each account is a single learner, so the
+// learner's class + board come straight from the account.
+export function saveProfileFromLearner(learner: {
+  studentId: string;
+  name: string;
+  grade: number;
+  board: 'CBSE' | 'ICSE';
+}): StudentProfile {
+  const existing = getProfile();
+  const profile: StudentProfile = {
+    id: learner.studentId,
+    name: learner.name,
+    class: learner.grade as 3 | 4 | 5 | 6 | 7,
+    board: learner.board,
+    streak: existing?.id === learner.studentId ? existing.streak : 0,
+    lastActiveDate: existing?.id === learner.studentId ? existing.lastActiveDate : '',
+    enrolledSubjects: ['sci', 'soc', 'eng'],
+    onboardingComplete: true,
+  };
+  saveProfile(profile);
+  return profile;
+}
+
 // ─── Auth token ───────────────────────────────────────────────────────────────
 
 export function getAuthToken(): string | null {

@@ -39,32 +39,38 @@ export function isLiveConcept(conceptId: string): boolean {
 
 export interface AuthResponse {
   token: string;
-  householdId: string;
-  displayName: string;
-}
-
-export interface ApiHouseholdStudent {
-  id: string;
+  userId: string;
+  studentId: string;
   name: string;
   grade: number;
   board: 'CBSE' | 'ICSE';
 }
 
-export async function registerHousehold(
+export interface LearnerProfile {
+  userId: string;
+  studentId: string;
+  name: string;
+  grade: number;
+  board: 'CBSE' | 'ICSE';
+}
+
+export async function registerUser(
   email: string,
-  displayName: string,
+  name: string,
   password: string,
+  grade: number,
+  board: 'CBSE' | 'ICSE',
 ): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, displayName, password }),
+    body: JSON.stringify({ email, name, password, grade, board }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
-export async function loginHousehold(
+export async function loginUser(
   email: string,
   password: string,
 ): Promise<AuthResponse> {
@@ -77,31 +83,17 @@ export async function loginHousehold(
   return res.json();
 }
 
-export async function logoutHousehold(): Promise<void> {
+export async function logoutUser(): Promise<void> {
   await fetch(`${API_BASE}/auth/logout`, {
     method: 'POST',
     headers: authHeaders(),
   });
 }
 
-export async function getHouseholdStudents(): Promise<ApiHouseholdStudent[]> {
-  const res = await fetch(`${API_BASE}/households/me/students`, {
+/** Rehydrates the authenticated learner's profile (class + board + student id). */
+export async function fetchMe(): Promise<LearnerProfile> {
+  const res = await fetch(`${API_BASE}/auth/me`, {
     headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  const data = await res.json();
-  return data.students ?? [];
-}
-
-export async function addStudentToHousehold(
-  name: string,
-  grade: number,
-  board: 'CBSE' | 'ICSE',
-): Promise<ApiHouseholdStudent> {
-  const res = await fetch(`${API_BASE}/households/me/students`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ name, grade, board }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

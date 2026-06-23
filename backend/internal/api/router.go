@@ -26,17 +26,16 @@ func NewRouter() http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// ── Public: auth ──────────────────────────────────────────────────────
-		r.Post("/auth/register", handlers.RegisterHousehold)
-		r.Post("/auth/login", handlers.LoginHousehold)
-		r.Post("/auth/logout", handlers.LogoutHousehold) // graceful; ok without valid token
+		r.Post("/auth/register", handlers.RegisterUser)
+		r.Post("/auth/login", handlers.LoginUser)
+		r.Post("/auth/logout", handlers.LogoutUser) // graceful; ok without valid token
 
-		// ── Protected: all data routes require a valid household session ──────
+		// ── Protected: all data routes require a valid user session ──────────
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.RequireAuth)
 
-			// Household management
-			r.Get("/households/me/students", handlers.GetHouseholdStudents)
-			r.Post("/households/me/students", handlers.AddStudentToHousehold)
+			// Authenticated learner profile (class + board + 1:1 student id)
+			r.Get("/auth/me", handlers.Me)
 
 			// Curriculum (no student required)
 			r.Get("/chapters", handlers.GetChapters)

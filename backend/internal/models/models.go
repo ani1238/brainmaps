@@ -66,6 +66,19 @@ type ActiveMCQOption struct {
 	Text string `json:"text"`
 }
 
+// ── User ──────────────────────────────────────────────────────────────────────
+// A user account is a single learner: it carries its own class (grade) and
+// board, and is paired 1:1 with a Student row that anchors all progress.
+
+type User struct {
+	ID        string    `json:"id"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	Grade     int       `json:"grade"`
+	Board     string    `json:"board"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // ── Student ───────────────────────────────────────────────────────────────────
 
 type Student struct {

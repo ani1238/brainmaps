@@ -103,9 +103,11 @@ func newBearerToken() (plain string, hash []byte, err error) {
 // ── Request / response shapes ─────────────────────────────────────────────────
 
 type registerReq struct {
-	Email       string `json:"email"`
-	DisplayName string `json:"displayName"`
-	Password    string `json:"password"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Password string `json:"password"`
+	Grade    int    `json:"grade"`
+	Board    string `json:"board"`
 }
 
 type loginReq struct {
@@ -113,39 +115,48 @@ type loginReq struct {
 	Password string `json:"password"`
 }
 
+// authResp is returned by register, login, and /auth/me. Each account is a
+// single learner, so the response carries the learner's class + board and the
+// 1:1 student id that anchors all progress.
 type authResp struct {
-	Token       string `json:"token"`
-	HouseholdID string `json:"householdId"`
-	DisplayName string `json:"displayName"`
+	Token     string `json:"token,omitempty"` // omitted by /auth/me
+	UserID    string `json:"userId"`
+	StudentID string `json:"studentId"`
+	Name      string `json:"name"`
+	Grade     int    `json:"grade"`
+	Board     string `json:"board"`
 }
 
-type householdStudentsResp struct {
-	Students []householdStudent `json:"students"`
-}
-
-type householdStudent struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Grade int    `json:"grade"`
-	Board string `json:"board"`
+// normalizeGradeBoard clamps grade to 3..7 (default 6) and board to CBSE/ICSE.
+func normalizeGradeBoard(grade int, board string) (int, string) {
+	if grade < 3 || grade > 7 {
+		grade = 6
+	}
+	board = strings.ToUpper(strings.TrimSpace(board))
+	if board != "CBSE" && board != "ICSE" {
+		board = "CBSE"
+	}
+	return grade, board
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 // POST /auth/register
-// Creates a new household account and returns an auth token.
-func RegisterHousehold(w http.ResponseWriter, r *http.Request) {
+// Creates a new single-learner account (with its 1:1 student) and returns an
+// auth token plus the learner's class + board.
+func RegisterUser(w http.ResponseWriter, r *http.Request) {
 	var req registerReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	req.DisplayName = strings.TrimSpace(req.DisplayName)
-	if req.Email == "" || req.DisplayName == "" || len(req.Password) < 8 {
-		http.Error(w, "email, displayName, and password (≥8 chars) are required", http.StatusBadRequest)
+	name := normalizeStudentName(req.Name)
+	if req.Email == "" || len(name) < 2 || len(req.Password) < 8 {
+		http.Error(w, "email, name, and password (≥8 chars) are required", http.StatusBadRequest)
 		return
 	}
+	grade, board := normalizeGradeBoard(req.Grade, req.Board)
 
 	pwHash, err := hashPassword(req.Password)
 	if err != nil {
@@ -153,12 +164,19 @@ func RegisterHousehold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var householdID, displayName string
-	err = db.Pool.QueryRow(r.Context(), `
-		INSERT INTO households (email, display_name, password_hash)
-		VALUES ($1, $2, $3)
-		RETURNING id, display_name
-	`, req.Email, req.DisplayName, pwHash).Scan(&householdID, &displayName)
+	tx, err := db.Pool.Begin(r.Context())
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var userID string
+	err = tx.QueryRow(r.Context(), `
+		INSERT INTO users (email, name, password_hash, grade, board)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id
+	`, req.Email, name, pwHash, grade, board).Scan(&userID)
 	if err != nil {
 		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
 			http.Error(w, "email already registered", http.StatusConflict)
@@ -168,28 +186,53 @@ func RegisterHousehold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create the 1:1 learner row that anchors all progress.
+	var studentID string
+	err = tx.QueryRow(r.Context(), `
+		INSERT INTO students (name, grade, board, user_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, name, grade, board, userID).Scan(&studentID)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+
 	token, tokenHash, err := newBearerToken()
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
-	db.Pool.Exec(r.Context(), `
-		INSERT INTO auth_sessions (household_id, token_hash, user_agent, ip_address)
+	_, err = tx.Exec(r.Context(), `
+		INSERT INTO auth_sessions (user_id, token_hash, user_agent, ip_address)
 		VALUES ($1, $2, $3, $4)
-	`, householdID, tokenHash, r.UserAgent(), r.RemoteAddr)
+	`, userID, tokenHash, r.UserAgent(), r.RemoteAddr)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(authResp{
-		Token:       token,
-		HouseholdID: householdID,
-		DisplayName: displayName,
+		Token:     token,
+		UserID:    userID,
+		StudentID: studentID,
+		Name:      name,
+		Grade:     grade,
+		Board:     board,
 	})
 }
 
 // POST /auth/login
-// Validates credentials and returns a new auth token.
-func LoginHousehold(w http.ResponseWriter, r *http.Request) {
+// Validates credentials and returns a new auth token plus the learner's
+// class + board and 1:1 student id.
+func LoginUser(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
@@ -197,15 +240,24 @@ func LoginHousehold(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
-	var householdID, displayName, pwHash string
+	var userID, name, pwHash, board string
+	var grade int
 	err := db.Pool.QueryRow(r.Context(), `
-		SELECT id, display_name, password_hash
-		FROM households
+		SELECT id, name, grade, board, password_hash
+		FROM users
 		WHERE lower(email) = $1
-	`, req.Email).Scan(&householdID, &displayName, &pwHash)
+	`, req.Email).Scan(&userID, &name, &grade, &board, &pwHash)
 	// Always call verifyPassword so timing is consistent even on not-found.
 	if !verifyPassword(req.Password, pwHash) || err != nil {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	var studentID string
+	if err := db.Pool.QueryRow(r.Context(), `
+		SELECT id FROM students WHERE user_id = $1
+	`, userID).Scan(&studentID); err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -215,21 +267,24 @@ func LoginHousehold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	db.Pool.Exec(r.Context(), `
-		INSERT INTO auth_sessions (household_id, token_hash, user_agent, ip_address)
+		INSERT INTO auth_sessions (user_id, token_hash, user_agent, ip_address)
 		VALUES ($1, $2, $3, $4)
-	`, householdID, tokenHash, r.UserAgent(), r.RemoteAddr)
+	`, userID, tokenHash, r.UserAgent(), r.RemoteAddr)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(authResp{
-		Token:       token,
-		HouseholdID: householdID,
-		DisplayName: displayName,
+		Token:     token,
+		UserID:    userID,
+		StudentID: studentID,
+		Name:      name,
+		Grade:     grade,
+		Board:     board,
 	})
 }
 
 // POST /auth/logout
 // Revokes the current session token. Safe to call without a valid token.
-func LogoutHousehold(w http.ResponseWriter, r *http.Request) {
+func LogoutUser(w http.ResponseWriter, r *http.Request) {
 	v := r.Header.Get("Authorization")
 	if strings.HasPrefix(v, "Bearer ") {
 		token := strings.TrimSpace(v[7:])
@@ -239,81 +294,35 @@ func LogoutHousehold(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GET /households/me/students
-// Lists all students enrolled in the authenticated household.
-func GetHouseholdStudents(w http.ResponseWriter, r *http.Request) {
-	householdID, _ := authmw.HouseholdID(r.Context())
-	rows, err := db.Pool.Query(r.Context(), `
-		SELECT s.id, s.name, s.grade, s.board
-		FROM students s
-		JOIN household_students hs ON hs.student_id = s.id
-		WHERE hs.household_id = $1
-		ORDER BY s.created_at
-	`, householdID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+// GET /auth/me
+// Returns the authenticated learner's profile (class + board + 1:1 student id)
+// for client rehydration. No token is included in the response.
+func Me(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authmw.UserID(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	defer rows.Close()
 
-	students := []householdStudent{}
-	for rows.Next() {
-		var s householdStudent
-		if rows.Scan(&s.ID, &s.Name, &s.Grade, &s.Board) == nil {
-			students = append(students, s)
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(householdStudentsResp{Students: students})
-}
-
-// POST /households/me/students
-// Creates a new student and enrolls them in the authenticated household.
-func AddStudentToHousehold(w http.ResponseWriter, r *http.Request) {
-	householdID, _ := authmw.HouseholdID(r.Context())
-
-	var req studentLoginReq // reuses the {name, grade, board} shape from students.go
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	name := normalizeStudentName(req.Name)
-	if len(name) < 2 {
-		http.Error(w, "name must be at least 2 characters", http.StatusBadRequest)
-		return
-	}
-	if req.Grade < 3 || req.Grade > 7 {
-		req.Grade = 6
-	}
-	req.Board = strings.ToUpper(strings.TrimSpace(req.Board))
-	if req.Board != "CBSE" && req.Board != "ICSE" {
-		req.Board = "CBSE"
-	}
-
-	// Insert student and household link atomically.
-	var studentID string
+	var name, board, studentID string
+	var grade int
 	err := db.Pool.QueryRow(r.Context(), `
-		WITH new_student AS (
-			INSERT INTO students (name, grade, board)
-			VALUES ($1, $2, $3)
-			RETURNING id
-		)
-		INSERT INTO household_students (household_id, student_id)
-		SELECT $4, id FROM new_student
-		RETURNING student_id
-	`, name, req.Grade, req.Board, householdID).Scan(&studentID)
+		SELECT u.name, u.grade, u.board, s.id
+		FROM users u
+		JOIN students s ON s.user_id = u.id
+		WHERE u.id = $1
+	`, userID).Scan(&name, &grade, &board, &studentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 
-	var s householdStudent
-	db.Pool.QueryRow(r.Context(), `
-		SELECT id, name, grade, board FROM students WHERE id = $1
-	`, studentID).Scan(&s.ID, &s.Name, &s.Grade, &s.Board)
-
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(s)
+	json.NewEncoder(w).Encode(authResp{
+		UserID:    userID,
+		StudentID: studentID,
+		Name:      name,
+		Grade:     grade,
+		Board:     board,
+	})
 }
