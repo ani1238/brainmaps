@@ -127,7 +127,7 @@ export default function DashboardPage() {
         </section>
 
         {/* ── Today's actions: Fix + Revise ── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* Today's Fix */}
           <div className="rounded-2xl p-5 flex flex-col justify-center" style={{ background: 'rgba(255,247,237,0.9)', border: '1.5px solid rgba(249,115,22,0.3)', backdropFilter: 'blur(12px)' }}>
             <div className="flex justify-between items-start gap-3">
