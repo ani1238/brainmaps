@@ -14,6 +14,7 @@ import {
   getRefreshToken,
   saveTokens,
   clearTokens,
+  clearProfile,
 } from '@/lib/storage';
 
 export const API_BASE =
@@ -67,18 +68,38 @@ async function refreshTokens(): Promise<boolean> {
   return refreshInFlight;
 }
 
+const PUBLIC_PATHS = new Set(['/', '/register', '/forgot', '/reset']);
+
+/**
+ * Clears the session and bounces to login when a protected call is
+ * irrecoverably unauthorized (e.g. an expired/invalid token with no working
+ * refresh). Prevents the app from silently rendering empty/zero data.
+ */
+function forceLogout(): void {
+  clearProfile(); // clears profile, progress, and both tokens
+  if (typeof window !== 'undefined' && !PUBLIC_PATHS.has(window.location.pathname)) {
+    window.location.replace('/');
+  }
+}
+
 /**
  * fetch wrapper for protected endpoints: injects the bearer token and, on a 401,
- * attempts a single silent refresh + retry before giving up.
+ * attempts a single silent refresh + retry before giving up. If still
+ * unauthorized, the session is reset and the user is sent to login.
  */
 async function authedFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const run = () =>
     fetch(input, { ...init, headers: { ...(init.headers ?? {}), ...authHeaders() } });
 
   let res = await run();
-  if (res.status === 401 && getRefreshToken()) {
-    const ok = await refreshTokens();
-    if (ok) res = await run();
+  if (res.status === 401) {
+    const ok = getRefreshToken() ? await refreshTokens() : false;
+    if (ok) {
+      res = await run();
+    }
+    if (res.status === 401) {
+      forceLogout();
+    }
   }
   return res;
 }
