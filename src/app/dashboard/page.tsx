@@ -51,11 +51,11 @@ export default function DashboardPage() {
   const fixFirstSubject = fixFirst ? subjectMeta(fixFirst.subjectKey.startsWith('english') ? 'english' : fixFirst.subjectKey).label : '';
 
   return (
-    <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
+    <div className="relative flex flex-col lg:flex-row min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: '#F4EFE5' }}>
       <GridBackground />
       <LeftRail sharpenCount={fixCount} recallCount={reviseCount} streak={dash?.streak.days ?? 0} />
 
-      <main className="relative flex-1 overflow-y-auto lg:overflow-hidden px-8 py-5 flex flex-col gap-4">
+      <main className="relative flex-1 lg:overflow-hidden px-4 lg:px-8 py-4 lg:py-5 pb-24 lg:pb-5 flex flex-col gap-4">
 
         {/* ── Header: greeting + mastery health bar ── */}
         <section
@@ -66,7 +66,7 @@ export default function DashboardPage() {
             <div>
               <div className="text-xs font-bold mb-0.5" style={{ color: '#78716c' }}>{todayLabel()}</div>
               <div className="flex items-baseline gap-3 flex-wrap">
-                <h1 className="text-3xl font-extrabold leading-none" style={{ color: '#1c1917' }}>Hi {profile?.name ?? 'Student'}! 👋</h1>
+                <h1 className="text-2xl lg:text-3xl font-extrabold leading-none" style={{ color: '#1c1917' }}>Hi {profile?.name ?? 'Student'}! 👋</h1>
                 <span className="text-sm" style={{ color: '#78716c' }}>About {estMin} minutes today</span>
               </div>
             </div>
@@ -100,7 +100,7 @@ export default function DashboardPage() {
 
         {/* ── Subject snapshot strip ── */}
         <section className="rounded-2xl px-5 py-4" style={{ background: 'rgba(255,255,255,0.45)', border: '1px dashed rgba(0,0,0,0.12)' }}>
-          <div className="flex gap-5 items-center">
+          <div className="flex flex-wrap items-center gap-3 lg:gap-5">
             <div className="flex-shrink-0 pr-4" style={{ borderRight: '1px dashed rgba(0,0,0,0.12)' }}>
               <div className="text-xs font-bold" style={{ color: '#78716c' }}>Subjects</div>
               <div className="font-bold text-xl mt-0.5">{dash?.subjects.reduce((a, s) => a + s.total, 0) ?? 0}</div>
@@ -108,7 +108,7 @@ export default function DashboardPage() {
             {(dash?.subjects ?? []).map(s => {
               const meta = subjectMeta(s.key);
               return (
-                <Link key={s.key} href={`/brain-map?subject=${s.key}`} className="flex-1 min-w-0 hover:opacity-80 transition-opacity">
+                <Link key={s.key} href={`/brain-map?subject=${s.key}`} className="flex-1 min-w-[130px] hover:opacity-80 transition-opacity">
                   <div className="flex items-center gap-2 mb-1.5 min-w-0">
                     <div className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style={{ background: meta.color }}>
                       {meta.letter}
@@ -127,7 +127,7 @@ export default function DashboardPage() {
         </section>
 
         {/* ── Today's actions: Fix + Revise ── */}
-        <div className="grid grid-cols-2 gap-4 flex-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
           {/* Today's Fix */}
           <div className="rounded-2xl p-5 flex flex-col justify-center" style={{ background: 'rgba(255,247,237,0.9)', border: '1.5px solid rgba(249,115,22,0.3)', backdropFilter: 'blur(12px)' }}>
             <div className="flex justify-between items-start gap-3">

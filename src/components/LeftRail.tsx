@@ -49,17 +49,80 @@ export function LeftRail({
   const recallCount = recallProp ?? live?.revise ?? 0;
   const streak = streakProp ?? live?.streak ?? 0;
 
+  async function handleLogout() {
+    try { await logoutUser(); } catch { /* revoke best-effort */ }
+    clearAuthToken();
+    clearProfile();
+    router.push('/');
+  }
+
   return (
-    <aside
-      className="flex flex-col h-full border-r"
-      style={{
-        width: 240,
-        background: 'rgba(255,255,255,0.55)',
-        backdropFilter: 'blur(12px)',
-        borderColor: 'rgba(79,70,229,0.15)',
-        padding: '24px 18px',
-        gap: 20,
-      }}
+    <>
+      {/* ── Mobile top bar (logo + student + logout) ── */}
+      <header
+        className="flex lg:hidden sticky top-0 z-40 items-center justify-between px-4 h-14 flex-shrink-0"
+        style={{
+          background: 'rgba(250,249,246,0.9)',
+          backdropFilter: 'blur(12px)',
+          borderBottom: '1px solid rgba(79,70,229,0.12)',
+        }}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <svg width="28" height="28" viewBox="0 0 36 36" className="flex-shrink-0">
+            <circle cx="18" cy="18" r="16" fill="#4F46E5" opacity="0.12" />
+            <circle cx="18" cy="18" r="16" fill="none" stroke="#4F46E5" strokeWidth="1.5" />
+            <circle cx="18" cy="18" r="7" fill="none" stroke="#4F46E5" strokeWidth="1" />
+          </svg>
+          <div className="min-w-0">
+            <div className="font-extrabold text-sm leading-none truncate" style={{ color: '#1c1917' }}>{displayName}</div>
+            <div className="font-mono text-[10px] mt-0.5" style={{ color: '#78716c' }}>Class {displayClass} · {displayBoard}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <span className="font-extrabold text-sm">{streak} 🔥</span>
+          <button type="button" onClick={handleLogout} className="text-[11px] font-semibold" style={{ color: '#4F46E5' }}>
+            Log out
+          </button>
+        </div>
+      </header>
+
+      {/* ── Mobile bottom tab nav ── */}
+      <nav
+        className="flex lg:hidden fixed bottom-0 inset-x-0 z-40 h-16"
+        style={{
+          background: 'rgba(250,249,246,0.95)',
+          backdropFilter: 'blur(12px)',
+          borderTop: '1px solid rgba(79,70,229,0.12)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
+      >
+        {NAV.map(n => {
+          const active = pathname === n.href || pathname.startsWith(n.href + '/');
+          return (
+            <Link
+              key={n.href}
+              href={n.href}
+              className="flex-1 flex flex-col items-center justify-center gap-0.5"
+              style={{ color: active ? '#4F46E5' : '#78716c' }}
+            >
+              <span className="text-xl leading-none">{n.icon}</span>
+              <span className="text-[10px] font-semibold">{n.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      {/* ── Desktop sidebar ── */}
+      <aside
+        className="hidden lg:flex flex-col h-full border-r"
+        style={{
+          width: 240,
+          background: 'rgba(255,255,255,0.55)',
+          backdropFilter: 'blur(12px)',
+          borderColor: 'rgba(79,70,229,0.15)',
+          padding: '24px 18px',
+          gap: 20,
+        }}
     >
       {/* Logo + brand */}
       <div className="flex items-center gap-3">
@@ -96,12 +159,7 @@ export function LeftRail({
         </div>
         <button
           type="button"
-          onClick={async () => {
-            try { await logoutUser(); } catch { /* revoke best-effort */ }
-            clearAuthToken();
-            clearProfile();
-            router.push('/');
-          }}
+          onClick={handleLogout}
           className="mt-2 text-[11px] font-semibold"
           style={{ color: '#4F46E5' }}
         >
@@ -170,6 +228,7 @@ export function LeftRail({
           <span className="font-extrabold text-xl">{streak} 🔥</span>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

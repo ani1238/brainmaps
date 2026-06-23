@@ -31,11 +31,11 @@ export default function ProgressPage() {
   const activity = dash?.activity ?? [];
 
   return (
-    <div className="relative flex h-screen overflow-hidden" style={{ background: '#F4EFE5' }}>
+    <div className="relative flex flex-col lg:flex-row min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: '#F4EFE5' }}>
       <GridBackground />
       <LeftRail />
 
-      <main className="relative flex-1 overflow-y-auto px-8 py-6 flex flex-col gap-5">
+      <main className="relative flex-1 lg:overflow-y-auto px-4 lg:px-8 py-4 lg:py-6 pb-24 lg:pb-6 flex flex-col gap-5">
         <div>
           <h1 className="text-3xl font-extrabold" style={{ color: '#1c1917' }}>My Progress 📈</h1>
           <p className="text-sm mt-1" style={{ color: '#78716c' }}>Everything you&apos;ve been building, in one place.</p>
@@ -43,10 +43,10 @@ export default function ProgressPage() {
 
         {/* ── Streak card ── */}
         <section
-          className="rounded-2xl p-6 flex items-center gap-5"
+          className="rounded-2xl p-5 lg:p-6 flex flex-wrap items-center gap-4 lg:gap-5"
           style={{ background: 'rgba(255,248,245,0.9)', border: '1px solid rgba(255,107,53,0.3)', backdropFilter: 'blur(12px)' }}
         >
-          <div className="text-6xl">🔥</div>
+          <div className="text-5xl lg:text-6xl">🔥</div>
           <div>
             <div className="text-4xl font-extrabold" style={{ color: '#FF6B35' }}>{streak?.days ?? 0} days</div>
             <div className="text-sm" style={{ color: '#78716c' }}>{(streak?.days ?? 0) > 0 ? 'in a row!' : 'Start a session today to begin a streak.'}</div>
@@ -91,13 +91,13 @@ export default function ProgressPage() {
               const meta = subjectMeta(s.key);
               return (
                 <div key={s.key} className="flex items-center gap-3">
-                  <div className="text-lg w-7 text-center">{meta.icon}</div>
-                  <div className="text-sm font-semibold w-32 flex-shrink-0" style={{ color: '#1c1917' }}>{meta.label}</div>
-                  <div className="flex-1 h-2.5 rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,0.08)' }}>
+                  <div className="text-lg w-7 text-center flex-shrink-0">{meta.icon}</div>
+                  <div className="text-sm font-semibold w-20 lg:w-32 flex-shrink-0 truncate" style={{ color: '#1c1917' }}>{meta.label}</div>
+                  <div className="flex-1 min-w-0 h-2.5 rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,0.08)' }}>
                     <div className="h-full rounded-full" style={{ width: `${s.pct}%`, background: meta.color }} />
                   </div>
-                  <div className="text-xs font-bold w-24 text-right" style={{ color: '#78716c' }}>
-                    {s.strong}/{s.total} strong · {s.pct}%
+                  <div className="text-[11px] lg:text-xs font-bold w-16 lg:w-24 text-right flex-shrink-0" style={{ color: '#78716c' }}>
+                    {s.strong}/{s.total} · {s.pct}%
                   </div>
                 </div>
               );
@@ -106,7 +106,7 @@ export default function ProgressPage() {
         </section>
 
         {/* ── This week: improving / needs attention ── */}
-        <div className="grid grid-cols-2 gap-4 pb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-4">
           <section className="rounded-2xl p-5" style={{ background: 'rgba(225,245,238,0.7)', border: '1px solid rgba(29,158,117,0.25)' }}>
             <div className="text-xs font-bold mb-3" style={{ color: COLORS.strong }}>Improving 📈</div>
             {(dash?.improving.length ?? 0) === 0 ? (

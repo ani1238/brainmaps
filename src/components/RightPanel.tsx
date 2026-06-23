@@ -183,9 +183,8 @@ export function RightPanel({
 
   return (
     <div
-      className="absolute right-0 top-0 bottom-0 flex flex-col animate-slide-in-right"
+      className="absolute right-0 left-0 sm:left-auto top-0 bottom-0 w-full sm:w-[420px] flex flex-col animate-slide-in-right"
       style={{
-        width: 420,
         background: 'rgba(255,255,255,0.92)',
         backdropFilter: 'blur(20px)',
         borderLeft: '1px solid rgba(79,70,229,0.2)',
