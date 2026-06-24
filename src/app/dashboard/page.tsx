@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { GridBackground } from '@/components/GridBackground';
 import { LeftRail } from '@/components/LeftRail';
 import { COLORS, SUBJECT_MAP } from '@/lib/tokens';
-import { fetchDashboard, fetchToday, type ApiDashboard, type ApiToday } from '@/lib/api';
+import { fetchDashboard, fetchToday, fetchPlan, fetchAgenda, type ApiDashboard, type ApiToday, type PlanState, type Agenda } from '@/lib/api';
 import { useProfile } from '@/lib/storage';
 import { assessmentHref, failedStation } from '@/lib/navigation';
 
@@ -47,6 +47,8 @@ export default function DashboardPage() {
   const router = useRouter();
   const [dash, setDash] = useState<ApiDashboard | null>(null);
   const [today, setToday] = useState<ApiToday | null>(null);
+  const [plan, setPlan] = useState<PlanState | null>(null);
+  const [agenda, setAgenda] = useState<Agenda | null>(null);
   const [loading, setLoading] = useState(true);
   const profile = useProfile();
 
@@ -55,6 +57,9 @@ export default function DashboardPage() {
       .then(([d, t]) => { setDash(d); setToday(t); })
       .catch(() => {})
       .finally(() => setLoading(false));
+    Promise.all([fetchPlan(), fetchAgenda()])
+      .then(([p, a]) => { setPlan(p); setAgenda(a); })
+      .catch(() => {});
   }, []);
 
   const m = dash?.mastery;
@@ -123,6 +128,9 @@ export default function DashboardPage() {
             </div>
           </div>
         </section>
+
+        {/* ── Your plan today (Learn-first) ── */}
+        <PlanTodayCard plan={plan} agenda={agenda} onStart={(href) => router.push(href)} onOpenPlan={() => router.push('/plan')} />
 
         {/* ── Subject snapshot strip ── */}
         <section className="rounded-2xl px-5 py-4" style={{ background: 'rgba(255,255,255,0.45)', border: '1px dashed rgba(0,0,0,0.12)' }}>
@@ -285,5 +293,67 @@ export default function DashboardPage() {
         )}
       </main>
     </div>
+  );
+}
+
+// ── Plan-today card: Learn-first agenda surfaced on the dashboard ──────────────
+function PlanTodayCard({ plan, agenda, onStart, onOpenPlan }: {
+  plan: PlanState | null;
+  agenda: Agenda | null;
+  onStart: (href: string) => void;
+  onOpenPlan: () => void;
+}) {
+  if (!plan) return null;
+
+  if (!plan.hasPlan) {
+    return (
+      <section className="rounded-2xl p-5 flex items-center justify-between gap-4 flex-wrap"
+        style={{ background: 'rgba(238,242,255,0.9)', border: '1.5px solid rgba(79,70,229,0.3)' }}>
+        <div className="flex-1 min-w-[180px]">
+          <div className="text-xs font-bold mb-1" style={{ color: COLORS.indigo }}>🗓️ New here?</div>
+          <h2 className="text-lg font-extrabold" style={{ color: '#1c1917' }}>Let&apos;s plan your year</h2>
+          <p className="text-sm mt-0.5" style={{ color: '#57534e' }}>A little each day, paced to your school. No overwhelm. ✨</p>
+        </div>
+        <button onClick={onOpenPlan}
+          className="px-4 py-2.5 rounded-xl font-bold text-sm text-white"
+          style={{ background: COLORS.indigo, boxShadow: '0 4px 16px rgba(79,70,229,0.3)' }}>
+          ✨ Create my plan
+        </button>
+      </section>
+    );
+  }
+
+  const learn = agenda?.learn ?? [];
+  const onLeave = agenda?.onLeave;
+  const first = learn[0];
+  const firstMeta = first ? subjectMeta(first.subjectKey.startsWith('english') ? 'english' : first.subjectKey) : null;
+
+  return (
+    <section className="rounded-2xl p-5"
+      style={{ background: 'rgba(238,242,255,0.9)', border: '1.5px solid rgba(79,70,229,0.3)', backdropFilter: 'blur(12px)' }}>
+      <div className="flex justify-between items-start gap-3 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-bold mb-1" style={{ color: COLORS.indigo }}>📘 Today&apos;s learning</div>
+          <h2 className="text-2xl font-extrabold" style={{ color: '#1c1917' }}>
+            {onLeave ? 'On a break 🌴' : learn.length > 0 ? `${learn.length} new ${learn.length === 1 ? 'concept' : 'concepts'} to learn` : 'All caught up! 🎉'}
+          </h2>
+          <p className="text-sm mt-1" style={{ color: '#57534e' }}>
+            {agenda?.positiveNote ?? 'Open your plan to see what\u2019s next.'}
+          </p>
+        </div>
+        {first && !onLeave && firstMeta && (
+          <button
+            onClick={() => onStart(assessmentHref('/sharpen', { conceptId: first.conceptId, level: 'level1' }, '/dashboard'))}
+            className="flex-shrink-0 px-4 py-2.5 rounded-xl font-bold text-sm text-white"
+            style={{ background: COLORS.indigo, boxShadow: '0 4px 16px rgba(79,70,229,0.3)' }}
+          >
+            ▸ Start: {first.conceptName.length > 22 ? first.conceptName.slice(0, 22) + '…' : first.conceptName}
+          </button>
+        )}
+      </div>
+      <button onClick={onOpenPlan} className="mt-4 inline-flex items-center gap-1 text-sm font-bold transition-opacity hover:opacity-80" style={{ color: COLORS.indigo }}>
+        Open my plan →
+      </button>
+    </section>
   );
 }
