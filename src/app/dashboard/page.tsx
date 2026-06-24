@@ -81,7 +81,7 @@ export default function DashboardPage() {
       <GridBackground />
       <LeftRail sharpenCount={fixCount} recallCount={reviseCount} streak={dash?.streak.days ?? 0} />
 
-      <main className="relative flex-1 lg:overflow-y-auto lg:min-h-0 px-4 lg:px-8 py-4 lg:py-5 pb-24 lg:pb-5 flex flex-col gap-4">
+      <main className="relative flex-1 lg:overflow-y-auto overflow-x-hidden lg:min-h-0 px-4 lg:px-8 py-4 lg:py-5 pb-24 lg:pb-5 flex flex-col gap-4">
 
         {/* ── Header: greeting + mastery health bar ── */}
         <section
@@ -241,14 +241,14 @@ export default function DashboardPage() {
         {recentSessions.length > 0 && (
           <section className="rounded-2xl p-4 flex flex-col lg:min-h-0" style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(0,0,0,0.08)', backdropFilter: 'blur(12px)' }}>
             <div className="text-xs font-bold mb-3 flex-shrink-0" style={{ color: '#78716c' }}>✅ Recently done</div>
-            <ul className="flex flex-col gap-1.5 overflow-y-auto lg:max-h-[34vh] pr-1">
-              {recentSessions.map((s, i) => {
+            <ul className="flex flex-col gap-1.5">
+              {recentSessions.slice(0, 4).map((s, i) => {
                 const meta = subjectMeta(s.subjectKey.startsWith('english') ? 'english' : s.subjectKey);
                 return (
                   <li key={`${s.conceptId}-${s.completedAt}-${i}`}>
                     <Link
                       href={`/brain-map?conceptId=${s.conceptId}`}
-                      className="flex items-center gap-3 rounded-xl px-2 py-1.5 -mx-2 transition-colors hover:bg-black/[0.04] active:bg-black/[0.06]"
+                      className="flex items-center gap-3 rounded-xl px-2 py-1.5 transition-colors hover:bg-black/[0.04] active:bg-black/[0.06]"
                       title={`Open ${s.conceptName} on the brain map`}
                     >
                       <div
