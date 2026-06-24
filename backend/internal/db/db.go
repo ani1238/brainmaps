@@ -22,8 +22,9 @@ func Connect(ctx context.Context) error {
 		return fmt.Errorf("parse DATABASE_URL: %w", err)
 	}
 
-	// Neon serverless: keep pool small (it charges per compute second)
-	cfg.MaxConns = 5
+	// Neon serverless: keep the pool modest. Request-scoped transactions (RLS)
+	// pin a connection per in-flight request, so leave headroom.
+	cfg.MaxConns = 10
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

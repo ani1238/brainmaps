@@ -53,14 +53,14 @@ func GetChapters(w http.ResponseWriter, r *http.Request) {
 
 	var board string
 	var grade int
-	if err := db.Pool.QueryRow(r.Context(), `
+	if err := db.QueryRow(r.Context(), `
 		SELECT board, grade FROM users WHERE id = $1
 	`, userID).Scan(&board, &grade); err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
 
-	rows, err := db.Pool.Query(r.Context(), `
+	rows, err := db.Query(r.Context(), `
 		SELECT ch.id, ch.subject_key, ch.name, ch.number, ch.order_idx,
 		       COUNT(c.id) AS concept_count,
 		       COUNT(c.id) FILTER (WHERE cp.state IN ('STRONG','RECALL_DUE')) AS mastered,

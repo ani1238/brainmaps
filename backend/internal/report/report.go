@@ -113,7 +113,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 
 	// ── Student name + streak ────────────────────────────────────────────────
 	var storedStreak, daysSince int
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT name, COALESCE(streak_days,0), COALESCE(current_date - streak_last_date, 2147483647)
 		FROM students WHERE id = $1
 	`, studentID).Scan(&rep.StudentName, &storedStreak, &daysSince)
@@ -123,7 +123,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 
 	// ── Effort (last 7 days) ─────────────────────────────────────────────────
 	var answers int
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT COUNT(*) FILTER (WHERE s.completed_at IS NOT NULL),
 		       COUNT(DISTINCT s.completed_at::date) FILTER (WHERE s.completed_at IS NOT NULL),
 		       COALESCE(SUM(s.mcq_total), 0)
@@ -134,7 +134,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 	rep.Effort.Minutes = answers * 2
 
 	// ── Mastery distribution (all attempted concepts) ────────────────────────
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT
 		  COUNT(*) FILTER (WHERE cp.state IN ('STRONG','RECALL_DUE')),
 		  COUNT(*) FILTER (WHERE cp.state = 'DEVELOPING'),
@@ -146,7 +146,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 	`, studentID).Scan(&rep.Mastery.Strong, &rep.Mastery.Developing, &rep.Mastery.Weak, &rep.Mastery.Total)
 
 	// ── Improving (biggest positive delta over last 2 sessions) ──────────────
-	impRows, err := db.Pool.Query(ctx, `
+	impRows, err := db.Query(ctx, `
 		WITH ranked AS (
 		  SELECT s.concept_id, s.score,
 		         ROW_NUMBER() OVER (PARTITION BY s.concept_id ORDER BY s.completed_at DESC) rn
@@ -174,7 +174,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 	}
 
 	// ── Focus areas (active weak concepts + their tags) ──────────────────────
-	faRows, err := db.Pool.Query(ctx, `
+	faRows, err := db.Query(ctx, `
 		SELECT c.name, array_agg(DISTINCT swc.tag) AS tags
 		FROM student_weak_concepts swc
 		JOIN concepts c ON c.id = swc.concept_id
@@ -195,7 +195,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 
 	// ── Recent AI feedback snippets (for the narrative) ──────────────────────
 	var feedback []string
-	fbRows, err := db.Pool.Query(ctx, `
+	fbRows, err := db.Query(ctx, `
 		SELECT sa.ai_feedback
 		FROM session_answers sa JOIN sessions s ON s.id = sa.session_id
 		WHERE s.student_id = $1 AND sa.ai_feedback IS NOT NULL AND sa.ai_feedback <> ''
@@ -213,7 +213,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 	}
 
 	// ── Week number + this week's focus subject ──────────────────────────────
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT COALESCE(CEIL(EXTRACT(epoch FROM now() - MIN(started_at)) / 604800.0), 1)
 		FROM sessions WHERE student_id = $1
 	`, studentID).Scan(&rep.WeekNumber)
@@ -221,7 +221,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 		rep.WeekNumber = 1
 	}
 	var focusSubjectKey string
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT c.subject_key
 		FROM sessions s JOIN concepts c ON c.id = s.concept_id
 		WHERE s.student_id = $1 AND s.started_at >= now() - interval '7 days'
@@ -232,7 +232,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 	// ── A real win this week (high score, ideally STRONG + all levels) ───────
 	var win Highlight
 	var winState, l1, l2, l3 string
-	if db.Pool.QueryRow(ctx, `
+	if db.QueryRow(ctx, `
 		SELECT c.name, COALESCE(cp.state,''), COALESCE(cp.l1_state,''), COALESCE(cp.l2_state,''), COALESCE(cp.l3_state,'')
 		FROM sessions s JOIN concepts c ON c.id = s.concept_id
 		LEFT JOIN concept_progress cp ON cp.student_id = s.student_id AND cp.concept_id = s.concept_id
@@ -265,14 +265,14 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 		  AND ($2 = '' OR c.name = $2)
 		ORDER BY (sa.ai_score < 0.8) DESC, sa.answered_at DESC
 		LIMIT 1`
-	if db.Pool.QueryRow(ctx, voiceQ, studentID, gapConcept).Scan(&voice.Question, &voice.Answer, &voiceFeedback) != nil && gapConcept != "" {
-		db.Pool.QueryRow(ctx, voiceQ, studentID, "").Scan(&voice.Question, &voice.Answer, &voiceFeedback)
+	if db.QueryRow(ctx, voiceQ, studentID, gapConcept).Scan(&voice.Question, &voice.Answer, &voiceFeedback) != nil && gapConcept != "" {
+		db.QueryRow(ctx, voiceQ, studentID, "").Scan(&voice.Question, &voice.Answer, &voiceFeedback)
 	}
 	haveVoice := voice.Answer != ""
 
 	// ── Recall (knowing) vs application (using), last 30 days ────────────────
 	var recallPct, applyPct *int
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT
 		  round(100.0 * avg(CASE WHEN sa.question_type IN ('MCQ','STORY_MCQ') THEN sa.is_correct::int END))::int,
 		  round(100.0 * avg(CASE WHEN sa.question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON') AND sa.ai_score IS NOT NULL THEN sa.ai_score END))::int
@@ -283,7 +283,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 	// ── Careless vs concept: among recent wrong answers that have timing, what
 	// share were "considered" (took real time) rather than rushed? ───────────
 	var totalWrong, consideredWrong int
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT COUNT(*) FILTER (WHERE wrong),
 		       COUNT(*) FILTER (WHERE wrong AND considered)
 		FROM (

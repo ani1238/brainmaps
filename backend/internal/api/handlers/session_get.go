@@ -25,7 +25,7 @@ func GetSession(w http.ResponseWriter, r *http.Request) {
 	var studentID, conceptID string
 	var score *float64
 
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.QueryRow(r.Context(), `
 		SELECT student_id, concept_id, score
 		FROM sessions WHERE id = $1 AND access_token_hash = $2
 	`, sessionID, tokenHash).Scan(&studentID, &conceptID, &score)
@@ -39,7 +39,7 @@ func GetSession(w http.ResponseWriter, r *http.Request) {
 	// open-answer types and freezes on the provisional option-only score.
 	// and the results screen freezes on the provisional MCQ-only score.
 	var ungradedCount int
-	db.Pool.QueryRow(r.Context(), `
+	db.QueryRow(r.Context(), `
 		SELECT COUNT(*) FROM session_answers
 		WHERE session_id    = $1
 		  AND question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
@@ -49,7 +49,7 @@ func GetSession(w http.ResponseWriter, r *http.Request) {
 
 	// Current mastery state (updated after AI grading completes)
 	var state models.MasteryState
-	db.Pool.QueryRow(r.Context(), `
+	db.QueryRow(r.Context(), `
 		SELECT state FROM concept_progress
 		WHERE student_id = $1 AND concept_id = $2
 	`, studentID, conceptID).Scan(&state)
@@ -82,7 +82,7 @@ func GetSession(w http.ResponseWriter, r *http.Request) {
 // i.e. recomputeSession passed the (tag-gated) outcome for this attempt.
 func stationCleared(ctx context.Context, sessionID string) bool {
 	var studentID, conceptID, station string
-	if db.Pool.QueryRow(ctx, `
+	if db.QueryRow(ctx, `
 		SELECT student_id, concept_id, station FROM sessions WHERE id = $1
 	`, sessionID).Scan(&studentID, &conceptID, &station) != nil {
 		return false
@@ -92,7 +92,7 @@ func stationCleared(ctx context.Context, sessionID string) bool {
 		return false
 	}
 	var state string
-	if db.Pool.QueryRow(ctx, fmt.Sprintf(
+	if db.QueryRow(ctx, fmt.Sprintf(
 		`SELECT %s FROM concept_progress WHERE student_id = $1 AND concept_id = $2`, col,
 	), studentID, conceptID).Scan(&state) != nil {
 		return false

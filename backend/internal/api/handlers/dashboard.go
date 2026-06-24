@@ -103,7 +103,7 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── 1. Per-subject rollup (only the 3 navigable subjects; english_* → english) ──
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT
 		  CASE WHEN c.subject_key LIKE 'english%' THEN 'english' ELSE c.subject_key END AS subj,
 		  COUNT(*) AS total,
@@ -153,7 +153,7 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// ── 2. Streak ────────────────────────────────────────────────────────────
 	var storedStreak, daysSinceActivity int
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT COALESCE(streak_days, 0),
 		       COALESCE(streak_best, 0),
 		       COALESCE(current_date - streak_last_date, 2147483647)
@@ -164,7 +164,7 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// ── 3. Activity — last 30 days (sessions per day) ──────────────────────────
 	counts := map[string]int{}
-	actRows, err := db.Pool.Query(ctx, `
+	actRows, err := db.Query(ctx, `
 		SELECT to_char(completed_at::date, 'YYYY-MM-DD') AS d, COUNT(*) AS n
 		FROM sessions
 		WHERE student_id = $1 AND completed_at IS NOT NULL
@@ -192,7 +192,7 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── 4. Improving — biggest positive score change over last 2 sessions ──────
-	impRows, err := db.Pool.Query(ctx, `
+	impRows, err := db.Query(ctx, `
 		WITH ranked AS (
 		  SELECT s.concept_id, s.score,
 		         ROW_NUMBER() OVER (PARTITION BY s.concept_id ORDER BY s.completed_at DESC) rn
@@ -222,7 +222,7 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── 5. Needs attention — needs_fixing station or weak mastery ──────────────
-	naRows, err := db.Pool.Query(ctx, `
+	naRows, err := db.Query(ctx, `
 		SELECT cp.concept_id, c.name,
 		       (cp.l1_state='needs_fixing' OR cp.l2_state='needs_fixing' OR cp.l3_state='needs_fixing'
 		        OR cp.strengthen_state='needs_fixing') AS flagged

@@ -51,7 +51,7 @@ func CreateLead(w http.ResponseWriter, r *http.Request) {
 	note := strings.TrimSpace(req.Note)
 
 	var id string
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.QueryRow(r.Context(), `
 		INSERT INTO leads (phone, name, note, source, user_agent, ip_address)
 		VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, $6)
 		RETURNING id
