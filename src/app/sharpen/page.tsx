@@ -281,7 +281,7 @@ function SharpenContent() {
         completedAt: new Date().toISOString(),
       }));
     }
-    router.push(returnTarget.href);
+    router.replace(returnTarget.href);
   }
 
   const stationLabel = level ? LEVEL_TO_STATION_LABEL[level] : null;
@@ -646,7 +646,7 @@ function SharpenContent() {
               {/* Passed + next level exists → go to next station */}
               {!aiStillGrading && passed && nextLevel && (
                 <button
-                  onClick={() => router.push(assessmentHref('/sharpen', {
+                  onClick={() => router.replace(assessmentHref('/sharpen', {
                     conceptId: conceptId ?? undefined,
                     level: nextLevel,
                   }, returnTarget.href))}
@@ -786,7 +786,7 @@ function SharpenContent() {
                     : 'Pick a concept from your Brain Map to start practising.'}
                 </p>
                 <button
-                  onClick={() => router.push(returnTarget.href)}
+                  onClick={() => router.replace(returnTarget.href)}
                   className="px-5 py-2.5 rounded-xl font-bold text-sm"
                   style={{ background: 'rgba(0,0,0,0.05)', color: '#78716c' }}
                 >
@@ -819,7 +819,7 @@ function SharpenContent() {
         >
           <div>
             <button
-              onClick={() => router.push(returnTarget.href)}
+              onClick={() => router.replace(returnTarget.href)}
               className="flex items-center gap-1.5 mb-5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:bg-white/80"
               style={{ background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(0,0,0,0.1)', color: '#44403c' }}
             >

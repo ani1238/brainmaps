@@ -174,11 +174,12 @@ export function RightPanel({
   function startStation(key: StationKey) {
     const level = STATION_TO_LEVEL[key];
     const returnTo = `/brain-map?conceptId=${concept.id}`;
-    if (key === 'keep_it_fresh') {
-      router.push(assessmentHref('/sharpen', { conceptId: concept.id, level }, returnTo));
-    } else {
-      router.push(assessmentHref('/sharpen', { conceptId: concept.id, level }, returnTo));
-    }
+    // Replace (not push) so the session doesn't sit in history above the
+    // concept view. On return the brain map canonicalises the bare conceptId
+    // back to the full subject/chapter/concept URL (also a replace), leaving
+    // the chapter as the entry directly behind it — so browser-back from a
+    // concept goes to its chapter instead of re-opening the level in a loop.
+    router.replace(assessmentHref('/sharpen', { conceptId: concept.id, level }, returnTo));
   }
 
   // Open the previous-reports page for a station (its past graded attempts).
