@@ -123,7 +123,9 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		ReviseQueue:         reviseQueue,
 		UpcomingReviseQueue: upcomingReviseQueue,
 	}
-	cache.SetJSON(r.Context(), cacheKey, resp, 30*time.Second)
+	// Today's Fix/Revise queues are action-sensitive (a just-passed level should
+	// drop out quickly), so keep this TTL short.
+	cache.SetJSON(r.Context(), cacheKey, resp, 60*time.Second)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Cache", "MISS")
 	json.NewEncoder(w).Encode(resp)

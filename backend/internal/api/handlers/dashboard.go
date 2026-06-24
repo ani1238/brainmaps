@@ -249,7 +249,9 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 		naRows.Close()
 	}
 
-	cache.SetJSON(ctx, cacheKey, resp, 30*time.Second)
+	// Dashboard aggregates change once per session; a few minutes of staleness
+	// is fine and keeps Neon load low.
+	cache.SetJSON(ctx, cacheKey, resp, 3*time.Minute)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Cache", "MISS")
 	json.NewEncoder(w).Encode(resp)

@@ -88,7 +88,9 @@ func GetChapters(w http.ResponseWriter, r *http.Request) {
 		chapters = append(chapters, ch)
 	}
 
-	cache.SetJSON(r.Context(), cacheKey, chapters, 30*time.Second)
+	// Brain-map chapter markers change only when a concept becomes fully
+	// mastered (rare), so they can be cached well beyond a single session.
+	cache.SetJSON(r.Context(), cacheKey, chapters, 10*time.Minute)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Cache", "MISS")
 	json.NewEncoder(w).Encode(chapters)
