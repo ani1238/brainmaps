@@ -67,6 +67,19 @@ func NewRouter() http.Handler {
 			// Today's plan + dashboard/progress summary
 			r.Get("/today", handlers.GetToday)
 			r.Get("/dashboard", handlers.GetDashboard)
+
+			// Student planner / calendar
+			r.Get("/plan", handlers.GetPlan)
+			r.Post("/plan/generate", handlers.GeneratePlan)
+			r.Post("/plan/settings", handlers.SavePlanSettings)
+			r.Get("/plan/agenda", handlers.GetAgenda)
+			r.Get("/plan/items", handlers.GetPlanItems)
+			r.Post("/plan/item/move", handlers.MovePlanItem)
+			r.Post("/plan/item/skip", handlers.SkipPlanItem)
+			r.Post("/plan/reflow", handlers.ReflowPlan)
+			r.Get("/plan/leaves", handlers.GetLeaves)
+			r.Post("/plan/leave", handlers.AddLeave)
+			r.Post("/plan/leave/remove", handlers.RemoveLeave)
 		})
 	})
 

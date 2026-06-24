@@ -655,3 +655,139 @@ export async function getSessionReportById(sessionId: string): Promise<SessionRe
   if (!res.ok) throw new Error(`getSessionReportById ${res.status}`);
   return res.json();
 }
+
+// ─── Student Planner / Calendar ───────────────────────────────────────────────
+
+export interface PlanSettings {
+  startDate: string;
+  timezone: string;
+  studyDays: number[];
+  newConceptsPerDay: number;
+  reviseCapPerDay: number;
+  fixCapPerDay: number;
+  subjectsPerWeek: number;
+}
+
+export interface PlanState {
+  hasPlan: boolean;
+  settings: PlanSettings;
+}
+
+export interface AgendaLearn { conceptId: string; conceptName: string; subjectKey: string; plannedDate: string; overdue: boolean; }
+export interface AgendaFix { conceptId: string; conceptName: string; subjectKey: string; level: string; }
+export interface AgendaRevise { conceptId: string; conceptName: string; subjectKey: string; dueDate: string; }
+
+export interface Agenda {
+  date: string;
+  learn: AgendaLearn[];
+  fix: AgendaFix[];
+  revise: AgendaRevise[];
+  learnTotal: number;
+  reviseTotal: number;
+  fixTotal: number;
+  estMinutes: number;
+  status: string;
+  positiveNote: string;
+  onLeave: boolean;
+}
+
+export interface PlanItem {
+  id: number;
+  conceptId: string;
+  conceptName: string;
+  subjectKey: string;
+  plannedDate: string;
+  orderIdx: number;
+  status: string;
+  source: string;
+}
+
+export interface PlanLeave { id: number; startDate: string; endDate: string; reason: string; }
+
+export async function fetchPlan(): Promise<PlanState> {
+  const res = await authedFetch(`${API_BASE}/plan`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`fetchPlan ${res.status}`);
+  return res.json();
+}
+
+export async function generatePlan(settings?: Partial<PlanSettings>): Promise<PlanState> {
+  const res = await authedFetch(`${API_BASE}/plan/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings ?? {}),
+  });
+  if (!res.ok) throw new Error(`generatePlan ${res.status}`);
+  return res.json();
+}
+
+export async function savePlanSettings(settings: Partial<PlanSettings>): Promise<PlanState> {
+  const res = await authedFetch(`${API_BASE}/plan/settings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!res.ok) throw new Error(`savePlanSettings ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAgenda(date?: string): Promise<Agenda> {
+  const qs = date ? `?date=${date}` : '';
+  const res = await authedFetch(`${API_BASE}/plan/agenda${qs}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`fetchAgenda ${res.status}`);
+  return res.json();
+}
+
+export async function fetchPlanItems(from: string, to: string): Promise<PlanItem[]> {
+  const res = await authedFetch(`${API_BASE}/plan/items?from=${from}&to=${to}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`fetchPlanItems ${res.status}`);
+  const d = await res.json();
+  return d.items ?? [];
+}
+
+export async function movePlanItem(id: number, date: string): Promise<void> {
+  const res = await authedFetch(`${API_BASE}/plan/item/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, date }),
+  });
+  if (!res.ok) throw new Error(`movePlanItem ${res.status}`);
+}
+
+export async function skipPlanItem(id: number): Promise<void> {
+  const res = await authedFetch(`${API_BASE}/plan/item/skip`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) throw new Error(`skipPlanItem ${res.status}`);
+}
+
+export async function reflowPlan(): Promise<void> {
+  const res = await authedFetch(`${API_BASE}/plan/reflow`, { method: 'POST' });
+  if (!res.ok) throw new Error(`reflowPlan ${res.status}`);
+}
+
+export async function fetchLeaves(): Promise<PlanLeave[]> {
+  const res = await authedFetch(`${API_BASE}/plan/leaves`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`fetchLeaves ${res.status}`);
+  const d = await res.json();
+  return d.leaves ?? [];
+}
+
+export async function addLeave(start: string, end: string, reason: string): Promise<void> {
+  const res = await authedFetch(`${API_BASE}/plan/leave`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ start, end, reason }),
+  });
+  if (!res.ok) throw new Error(`addLeave ${res.status}`);
+}
+
+export async function removeLeave(id: number): Promise<void> {
+  const res = await authedFetch(`${API_BASE}/plan/leave/remove`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  if (!res.ok) throw new Error(`removeLeave ${res.status}`);
+}

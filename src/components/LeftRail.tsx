@@ -18,6 +18,7 @@ interface LeftRailProps {
 
 const NAV = [
   { href: '/dashboard', label: 'Today',        icon: '🏠' },
+  { href: '/plan',      label: 'Plan',         icon: '🗓️' },
   { href: '/brain-map', label: 'Map',          icon: '🧠' },
   { href: '/progress',  label: 'My Progress',  icon: '📈' },
   { href: '/report',    label: 'Report',       icon: '👪' },

@@ -515,24 +515,45 @@ func unlockReviseIfEligible(ctx context.Context, studentID, conceptID string) {
 // updateStreak bumps the student's daily streak on session completion.
 //   - same day as last activity → no change
 //   - exactly the next day      → streak_days + 1
-//   - any larger gap (or first) → reset to 1
+//   - a larger gap whose in-between days are ALL covered by planned leave →
+//     streak continues (+1) — a break shouldn't punish the student
+//   - any other gap (or first)  → reset to 1
 //
 // streak_best tracks the all-time high.
 func updateStreak(ctx context.Context, studentID string) {
+	// Treat a multi-day gap as continuous when every day strictly between the
+	// last active day and today is a recorded leave day (streak freeze).
 	db.Pool.Exec(ctx, `
-		UPDATE students
+		WITH s AS (SELECT streak_last_date AS last FROM students WHERE id = $1),
+		gap AS (
+		  SELECT d::date AS d
+		  FROM s, generate_series(s.last + 1, current_date - 1, interval '1 day') d
+		  WHERE s.last IS NOT NULL
+		),
+		excused AS (
+		  SELECT NOT EXISTS (
+		    SELECT 1 FROM gap g
+		    WHERE NOT EXISTS (
+		      SELECT 1 FROM plan_leaves l
+		      WHERE l.student_id = $1 AND g.d BETWEEN l.start_date AND l.end_date
+		    )
+		  ) AND EXISTS (SELECT 1 FROM gap) AS all_excused
+		)
+		UPDATE students st
 		SET streak_days = CASE
-		        WHEN streak_last_date = current_date           THEN streak_days
-		        WHEN streak_last_date = current_date - 1        THEN streak_days + 1
+		        WHEN st.streak_last_date = current_date     THEN st.streak_days
+		        WHEN st.streak_last_date = current_date - 1  THEN st.streak_days + 1
+		        WHEN (SELECT all_excused FROM excused)       THEN st.streak_days + 1
 		        ELSE 1
 		    END,
-		    streak_best = GREATEST(streak_best, CASE
-		        WHEN streak_last_date = current_date           THEN streak_days
-		        WHEN streak_last_date = current_date - 1        THEN streak_days + 1
+		    streak_best = GREATEST(st.streak_best, CASE
+		        WHEN st.streak_last_date = current_date     THEN st.streak_days
+		        WHEN st.streak_last_date = current_date - 1  THEN st.streak_days + 1
+		        WHEN (SELECT all_excused FROM excused)       THEN st.streak_days + 1
 		        ELSE 1
 		    END),
 		    streak_last_date = current_date
-		WHERE id = $1
+		WHERE st.id = $1
 	`, studentID)
 }
 
