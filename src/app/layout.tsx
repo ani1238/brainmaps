@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans, JetBrains_Mono, Inter, Playfair_Display } from "next/font/google";
 import { AuthGate } from "@/components/AuthGate";
+import { ChunkErrorReloader } from "@/components/ChunkErrorReloader";
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -48,6 +49,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${plusJakarta.variable} ${jetbrainsMono.variable} ${inter.variable} ${playfair.variable} h-full`}>
       <body className="min-h-full" style={{ fontFamily: "var(--font-jakarta), system-ui, sans-serif" }}>
+        <ChunkErrorReloader />
         <AuthGate>{children}</AuthGate>
       </body>
     </html>
