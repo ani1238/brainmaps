@@ -22,7 +22,7 @@ type GradeResult struct {
 }
 
 // GradeOpenAnswers runs async after a session completes.
-// It grades EVERY non-MCQ answer (DESCRIPTIVE, FEYNMAN, BLURT, ACTIVE_RECALL,
+// It grades EVERY open-answer response (DESCRIPTIVE, FEYNMAN, BLURT, ACTIVE_RECALL,
 // SPOT_IT, FIX_IT, PRODUCE_IT, CONTEXT_CLUE, GENERATIVE_PRODUCTION, …) via
 // an available AI provider, then recomputes the session score and updates
 // concept_progress.
@@ -30,10 +30,11 @@ func GradeOpenAnswers(sessionID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	// 1. Load all open-ended answers for this session (anything that isn't MCQ)
+	// 1. Load all open-ended answers for this session.
 	rows, err := db.Pool.Query(ctx, `
 		SELECT sa.id, sa.question_id, sa.question_type, sa.student_text,
-		       q.text, q.key_concepts, q.rubric_hint,
+		       q.text, q.key_concepts,
+		       COALESCE(array_to_string(q.rubric_points, '; '), q.rubric_hint),
 		       c.name AS concept_name, c.subject_key, ch.name AS chapter_name
 		FROM session_answers sa
 		JOIN questions q ON q.id = sa.question_id
@@ -41,7 +42,7 @@ func GradeOpenAnswers(sessionID string) {
 		JOIN concepts  c ON c.id = s.concept_id
 		JOIN chapters  ch ON ch.id = c.chapter_id
 		WHERE sa.session_id = $1
-		  AND sa.question_type <> 'MCQ'
+		  AND sa.question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
 		  AND sa.student_text IS NOT NULL
 		  AND sa.ai_graded_at IS NULL
 	`, sessionID)
@@ -124,7 +125,9 @@ func GradeOpenAnswers(sessionID string) {
 
 	db.Pool.Exec(ctx, `
 		UPDATE session_answers SET ai_graded_at = now()
-		WHERE session_id = $1 AND question_type <> 'MCQ' AND student_text IS NOT NULL
+		WHERE session_id = $1
+		  AND question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
+		  AND student_text IS NOT NULL
 	`, sessionID)
 }
 
@@ -301,6 +304,11 @@ func scoringRubric(qType string) string {
 			"- 0.5–0.8: reasonable inference but reasoning is partly unsupported by the clues\n" +
 			"- 0.2–0.5: guesses in the right area but ignores or misreads the clues\n" +
 			"- 0.0–0.2: inference is unsupported, wrong, or unrelated to the passage\n"
+	case "HOTS":
+		return "- 0.8–1.0: applies the concept to the unfamiliar scenario with complete, well-linked reasoning\n" +
+			"- 0.5–0.8: mostly applies the concept correctly but misses one important link or consequence\n" +
+			"- 0.2–0.5: has a relevant idea but reasoning is incomplete, generic, or partly incorrect\n" +
+			"- 0.0–0.2: does not address the scenario or uses the wrong concept\n"
 	default:
 		// Generic band for any other open-ended type
 		return "- 0.8–1.0: fully correct and complete at Class 6 NCERT level\n" +

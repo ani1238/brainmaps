@@ -15,11 +15,20 @@ type Concept struct {
 type QuestionType string
 
 const (
-	MCQ          QuestionType = "MCQ"
-	Descriptive  QuestionType = "DESCRIPTIVE"
-	Feynman      QuestionType = "FEYNMAN"
-	Blurt        QuestionType = "BLURT"
-	ActiveRecall QuestionType = "ACTIVE_RECALL"
+	MCQ                  QuestionType = "MCQ"
+	StoryMCQ             QuestionType = "STORY_MCQ"
+	HOTS                 QuestionType = "HOTS"
+	HOTSMCQ              QuestionType = "HOTS_MCQ"
+	AssertionReason      QuestionType = "ASSERTION_REASON"
+	Descriptive          QuestionType = "DESCRIPTIVE"
+	Feynman              QuestionType = "FEYNMAN"
+	Blurt                QuestionType = "BLURT"
+	ActiveRecall         QuestionType = "ACTIVE_RECALL"
+	SpotIt               QuestionType = "SPOT_IT"
+	FixIt                QuestionType = "FIX_IT"
+	ProduceIt            QuestionType = "PRODUCE_IT"
+	ContextClue          QuestionType = "CONTEXT_CLUE"
+	GenerativeProduction QuestionType = "GENERATIVE_PRODUCTION"
 )
 
 type QuestionLevel string
@@ -33,15 +42,19 @@ const (
 )
 
 type Question struct {
-	ID          string        `json:"id"`
-	ConceptID   string        `json:"conceptId"`
-	Type        QuestionType  `json:"type"`
-	Level       QuestionLevel `json:"level"`
-	Text        string        `json:"text"`
-	Explanation *string       `json:"-"`
-	RubricHint  *string       `json:"-"`
-	KeyConcepts []string      `json:"-"`
-	Options     []MCQOption   `json:"options,omitempty"`
+	ID           string        `json:"id"`
+	ConceptID    string        `json:"conceptId"`
+	Type         QuestionType  `json:"type"`
+	Level        QuestionLevel `json:"level"`
+	Text         string        `json:"text"`
+	Explanation  *string       `json:"-"`
+	RubricHint   *string       `json:"-"`
+	RubricPoints []string      `json:"-"`
+	KeyPoints    []string      `json:"-"`
+	RecallGuide  *string       `json:"-"`
+	Preamble     *string       `json:"-"`
+	KeyConcepts  []string      `json:"-"`
+	Options      []MCQOption   `json:"options,omitempty"`
 }
 
 type MCQOption struct {
@@ -53,12 +66,14 @@ type MCQOption struct {
 // ActiveQuestion is safe to send before a session is completed. Answer keys,
 // explanations, rubrics, and grading tags remain server-side.
 type ActiveQuestion struct {
-	ID        string            `json:"id"`
-	ConceptID string            `json:"conceptId"`
-	Type      QuestionType      `json:"type"`
-	Level     QuestionLevel     `json:"level"`
-	Text      string            `json:"text"`
-	Options   []ActiveMCQOption `json:"options,omitempty"`
+	ID          string            `json:"id"`
+	ConceptID   string            `json:"conceptId"`
+	Type        QuestionType      `json:"type"`
+	Level       QuestionLevel     `json:"level"`
+	Text        string            `json:"text"`
+	RecallGuide *string           `json:"recallGuide,omitempty"`
+	Preamble    *string           `json:"preamble,omitempty"`
+	Options     []ActiveMCQOption `json:"options,omitempty"`
 }
 
 type ActiveMCQOption struct {
@@ -201,7 +216,7 @@ type CompleteSessionReq struct {
 type CompleteSessionResp struct {
 	SessionID       string       `json:"sessionId"`
 	Score           float64      `json:"score"`  // immediate MCQ-only score; updates after AI grading
-	Passed          bool         `json:"passed"` // score >= 0.80 AND station cleared (tag gate can demote, never promote)
+	Passed          bool         `json:"passed"` // score >= 0.60 AND station cleared (tag gate can demote, never promote)
 	NewState        MasteryState `json:"newState"`
 	AIGrading       bool         `json:"aiGrading"`       // true = an AI provider is still working
 	ReviewAvailable bool         `json:"reviewAvailable"` // true once grading is final

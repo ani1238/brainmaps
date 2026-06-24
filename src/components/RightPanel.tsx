@@ -435,6 +435,10 @@ function StationTab({ stationKey, status, questions, loading, reviseSchedule, on
 
 const TYPE_LABELS: Record<string, string> = {
   MCQ: 'pick-the-answer',
+  STORY_MCQ: 'story choice',
+  HOTS: 'think deeper',
+  HOTS_MCQ: 'think deeper',
+  ASSERTION_REASON: 'assertion-reason',
   DESCRIPTIVE: 'short answer',
   FEYNMAN: 'teach-a-friend',
   BLURT: 'brain-dump',

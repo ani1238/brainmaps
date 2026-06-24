@@ -2,6 +2,10 @@
 
 export type QuestionType =
   | 'MCQ'
+  | 'STORY_MCQ'
+  | 'HOTS'
+  | 'HOTS_MCQ'
+  | 'ASSERTION_REASON'
   | 'DESCRIPTIVE'
   | 'FEYNMAN'
   | 'BLURT'

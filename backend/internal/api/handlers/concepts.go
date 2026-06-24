@@ -240,7 +240,11 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Pool.Query(r.Context(), `
-		SELECT q.id, q.type, q.level, q.text, q.explanation, q.rubric_hint, q.key_concepts,
+		SELECT q.id, q.type, q.level, q.text, q.explanation, q.rubric_hint,
+		       COALESCE(q.rubric_points, '{}'::text[]),
+		       COALESCE(q.key_points, '{}'::text[]),
+		       q.recall_guide, q.preamble,
+		       q.key_concepts,
 		       o.option_key, o.text AS option_text, o.is_correct
 		FROM questions q
 		LEFT JOIN mcq_options o ON o.question_id = q.id
@@ -311,11 +315,13 @@ func activeQuestions(questions []models.Question) []models.ActiveQuestion {
 	result := make([]models.ActiveQuestion, 0, len(questions))
 	for _, question := range questions {
 		active := models.ActiveQuestion{
-			ID:        question.ID,
-			ConceptID: question.ConceptID,
-			Type:      question.Type,
-			Level:     question.Level,
-			Text:      question.Text,
+			ID:          question.ID,
+			ConceptID:   question.ConceptID,
+			Type:        question.Type,
+			Level:       question.Level,
+			Text:        question.Text,
+			RecallGuide: question.RecallGuide,
+			Preamble:    question.Preamble,
 		}
 		for _, option := range question.Options {
 			active.Options = append(active.Options, models.ActiveMCQOption{
@@ -338,12 +344,15 @@ func scanQuestionRows(rows pgx.Rows, conceptID string) ([]models.Question, error
 		var (
 			qID, qType, qLevel, qText string
 			explanation, rubricHint   *string
+			rubricPoints, keyPoints   []string
+			recallGuide, preamble     *string
 			keyConcepts               []string
 			optKey, optText           *string
 			isCorrect                 *bool
 		)
 		if err := rows.Scan(
-			&qID, &qType, &qLevel, &qText, &explanation, &rubricHint, &keyConcepts,
+			&qID, &qType, &qLevel, &qText, &explanation, &rubricHint,
+			&rubricPoints, &keyPoints, &recallGuide, &preamble, &keyConcepts,
 			&optKey, &optText, &isCorrect,
 		); err != nil {
 			return nil, err
@@ -351,14 +360,18 @@ func scanQuestionRows(rows pgx.Rows, conceptID string) ([]models.Question, error
 
 		if _, exists := qMap[qID]; !exists {
 			qMap[qID] = &models.Question{
-				ID:          qID,
-				ConceptID:   conceptID,
-				Type:        models.QuestionType(qType),
-				Level:       models.QuestionLevel(qLevel),
-				Text:        qText,
-				Explanation: explanation,
-				RubricHint:  rubricHint,
-				KeyConcepts: keyConcepts,
+				ID:           qID,
+				ConceptID:    conceptID,
+				Type:         models.QuestionType(qType),
+				Level:        models.QuestionLevel(qLevel),
+				Text:         qText,
+				Explanation:  explanation,
+				RubricHint:   rubricHint,
+				RubricPoints: rubricPoints,
+				KeyPoints:    keyPoints,
+				RecallGuide:  recallGuide,
+				Preamble:     preamble,
+				KeyConcepts:  keyConcepts,
 			}
 			order = append(order, qID)
 		}
@@ -433,7 +446,11 @@ func recentlyClearedTags(ctx context.Context, studentID, conceptID string) []str
 // lower-level questions than the revise set itself.
 func recheckCandidates(ctx context.Context, conceptID string, tags []string) []models.Question {
 	rows, err := db.Pool.Query(ctx, `
-		SELECT q.id, q.type, q.level, q.text, q.explanation, q.rubric_hint, q.key_concepts,
+		SELECT q.id, q.type, q.level, q.text, q.explanation, q.rubric_hint,
+		       COALESCE(q.rubric_points, '{}'::text[]),
+		       COALESCE(q.key_points, '{}'::text[]),
+		       q.recall_guide, q.preamble,
+		       q.key_concepts,
 		       o.option_key, o.text AS option_text, o.is_correct
 		FROM questions q
 		LEFT JOIN mcq_options o ON o.question_id = q.id

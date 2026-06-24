@@ -289,6 +289,7 @@ function DescriptiveQuestion({ question, onNext, onSubmitAnswer }: {
 const OPEN_TYPE_COPY: Record<string, { label: string; placeholder: string }> = {
   SPOT_IT:               { label: 'Spot it',       placeholder: 'Point out what you spotted and why…' },
   FIX_IT:                { label: 'Fix it',        placeholder: 'Find the mistake and write the correction…' },
+  HOTS:                  { label: 'Think deeper',  placeholder: 'Use the concept to reason through the scenario…' },
   PRODUCE_IT:            { label: 'Produce it',    placeholder: 'Write your own example or answer…' },
   GENERATIVE_PRODUCTION: { label: 'Produce it',    placeholder: 'Write your own example or answer…' },
   CONTEXT_CLUE:          { label: 'Use the clues', placeholder: 'Use the clues to work out your answer…' },

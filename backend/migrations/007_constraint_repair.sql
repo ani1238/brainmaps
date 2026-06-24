@@ -12,6 +12,10 @@ ALTER TABLE questions
   ADD CONSTRAINT questions_type_check
   CHECK (type IN (
     'MCQ',
+    'STORY_MCQ',
+    'HOTS',
+    'HOTS_MCQ',
+    'ASSERTION_REASON',
     'DESCRIPTIVE',
     'FEYNMAN',
     'BLURT',
