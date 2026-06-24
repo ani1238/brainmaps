@@ -119,7 +119,7 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 		GROUP BY subj
 	`, studentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	tmp := make(map[string]SubjectRollup)

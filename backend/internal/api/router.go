@@ -18,6 +18,7 @@ func NewRouter() http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(securityHeaders)
 	r.Use(corsMiddleware)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -25,13 +26,17 @@ func NewRouter() http.Handler {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// ── Public: auth ──────────────────────────────────────────────────────
-		r.Post("/auth/register", handlers.RegisterUser)
-		r.Post("/auth/login", handlers.LoginUser)
-		r.Post("/auth/refresh", handlers.RefreshSession) // rotate refresh -> new access
-		r.Post("/auth/logout", handlers.LogoutUser)      // graceful; ok without valid token
-		r.Post("/auth/forgot", handlers.ForgotPassword)  // request a reset link
-		r.Post("/auth/reset", handlers.ResetPassword)    // consume reset token
+		// ── Public: auth (rate-limited per IP to slow brute force / abuse) ────
+		authLimiter := newIPLimiter(60, 20) // ~60/min, burst 20 — generous for real users
+		r.Group(func(r chi.Router) {
+			r.Use(authLimiter.middleware)
+			r.Post("/auth/register", handlers.RegisterUser)
+			r.Post("/auth/login", handlers.LoginUser)
+			r.Post("/auth/refresh", handlers.RefreshSession) // rotate refresh -> new access
+			r.Post("/auth/logout", handlers.LogoutUser)      // graceful; ok without valid token
+			r.Post("/auth/forgot", handlers.ForgotPassword)  // request a reset link
+			r.Post("/auth/reset", handlers.ResetPassword)    // consume reset token
+		})
 
 		// ── Public: enrollment lead capture (login/enroll form) ───────────────
 		r.Post("/leads", handlers.CreateLead)
@@ -102,6 +107,18 @@ func allowedOrigins() map[string]bool {
 		}
 	}
 	return set
+}
+
+// securityHeaders adds conservative response headers on every API response.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		w.Header().Set("X-Robots-Tag", "noindex")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func corsMiddleware(next http.Handler) http.Handler {

@@ -37,7 +37,7 @@ func StartSession(w http.ResponseWriter, r *http.Request) {
 		RETURNING id
 	`, req.StudentID, req.ConceptID, req.Station, tokenHash).Scan(&sessionID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 

@@ -52,7 +52,7 @@ func GeneratePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	grade, board := studentGradeBoard(r, studentID)
 	if err := plan.Generate(r.Context(), studentID, grade, board, settings); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, planResp{HasPlan: true, Settings: settings})
@@ -73,7 +73,7 @@ func SavePlanSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	merged := mergeSettings(current, body)
 	if err := plan.SaveSettings(r.Context(), studentID, merged); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, planResp{HasPlan: plan.HasPlan(r.Context(), studentID), Settings: merged})
@@ -95,7 +95,7 @@ func GetAgenda(w http.ResponseWriter, r *http.Request) {
 	settings, _, _ := plan.GetSettings(r.Context(), studentID)
 	agenda, err := plan.Agenda(r.Context(), studentID, settings, date)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, agenda)
@@ -117,7 +117,7 @@ func GetPlanItems(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := plan.Items(r.Context(), studentID, from, to)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, map[string]any{"items": items})
@@ -139,7 +139,7 @@ func GetCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := plan.Calendar(r.Context(), studentID, from, to)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, map[string]any{"entries": entries})
@@ -167,7 +167,7 @@ func MovePlanItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := plan.MoveItem(r.Context(), studentID, req.ID, req.Date); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -190,7 +190,7 @@ func SkipPlanItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := plan.SkipItem(r.Context(), studentID, req.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -205,7 +205,7 @@ func ReflowPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	settings, _, _ := plan.GetSettings(r.Context(), studentID)
 	if err := plan.Reflow(r.Context(), studentID, settings); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -220,7 +220,7 @@ func GetLeaves(w http.ResponseWriter, r *http.Request) {
 	}
 	leaves, err := plan.Leaves(r.Context(), studentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	writeJSON(w, map[string]any{"leaves": leaves})
@@ -252,7 +252,7 @@ func AddLeave(w http.ResponseWriter, r *http.Request) {
 	}
 	settings, _, _ := plan.GetSettings(r.Context(), studentID)
 	if err := plan.AddLeave(r.Context(), studentID, start, end, req.Reason, settings); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -271,7 +271,7 @@ func RemoveLeave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := plan.RemoveLeave(r.Context(), studentID, req.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

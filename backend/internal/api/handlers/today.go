@@ -58,7 +58,7 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		LIMIT 8
 	`, studentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	defer fixRows.Close()
@@ -85,7 +85,7 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		LIMIT 5
 	`, studentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	defer revRows.Close()
@@ -111,7 +111,7 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		LIMIT 50
 	`, studentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	defer upcomingRows.Close()
@@ -131,7 +131,7 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 		LIMIT 6
 	`, studentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	defer recentRows.Close()
