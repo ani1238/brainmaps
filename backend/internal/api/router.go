@@ -47,6 +47,8 @@ func NewRouter() http.Handler {
 			r.Post("/auth/parent-pin", handlers.SetParentPin)
 			r.Get("/report/status", handlers.ReportStatus)
 			r.Post("/report", handlers.GetParentReport)
+			r.Post("/report/generate", handlers.GenerateParentReport) // on-demand fresh report
+			r.Post("/report/item", handlers.GetParentReportItem)      // open a past report by id
 
 			// Curriculum (no student required)
 			r.Get("/chapters", handlers.GetChapters)

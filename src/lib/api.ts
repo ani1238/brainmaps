@@ -242,11 +242,46 @@ export async function setParentPin(pin: string, currentPin?: string): Promise<vo
 }
 
 /** Verifies the PIN and returns today's (cached) parent report. */
-export async function fetchParentReport(pin: string): Promise<ParentReport> {
+export interface ReportHistoryItem {
+  id: string;
+  generatedAt: string;
+}
+
+export interface ReportBundle {
+  report: ParentReport | null;
+  reportId: string;
+  history: ReportHistoryItem[];
+  weeklyCount: number;
+}
+
+/** Verifies the PIN and returns the latest report + history + this week's usage. */
+export async function unlockReports(pin: string): Promise<ReportBundle> {
   const res = await authedFetch(`${API_BASE}/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pin }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** Generates a fresh report on demand, stores it, and returns the updated bundle. */
+export async function generateReport(pin: string): Promise<ReportBundle> {
+  const res = await authedFetch(`${API_BASE}/report/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** Opens one of the parent's past reports by id. */
+export async function fetchReportItem(pin: string, id: string): Promise<ParentReport> {
+  const res = await authedFetch(`${API_BASE}/report/item`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin, id }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
