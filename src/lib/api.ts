@@ -482,10 +482,21 @@ export interface ApiTodayItem {
   } | null;
 }
 
+export interface ApiRecentSession {
+  conceptId: string;
+  conceptName: string;
+  subjectKey: string;
+  station: string;
+  score: number;
+  passed: boolean;
+  completedAt: string;
+}
+
 export interface ApiToday {
   fixQueue: ApiTodayItem[];
   reviseQueue: ApiTodayItem[];
   upcomingReviseQueue: ApiTodayItem[];
+  recentSessions: ApiRecentSession[];
 }
 
 export async function fetchToday(): Promise<ApiToday> {
@@ -500,6 +511,7 @@ export async function fetchToday(): Promise<ApiToday> {
     fixQueue: d.fixQueue ?? [],
     reviseQueue: d.reviseQueue ?? [],
     upcomingReviseQueue: d.upcomingReviseQueue ?? [],
+    recentSessions: d.recentSessions ?? [],
   };
 }
 

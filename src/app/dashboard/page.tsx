@@ -18,6 +18,31 @@ function subjectMeta(key: string) {
   return SUBJECT_MAP[key] ?? { label: key, letter: '?', color: COLORS.science, icon: '📘' };
 }
 
+const STATION_DISPLAY: Record<string, string> = {
+  level1: 'Level 1',
+  level2: 'Level 2',
+  level3: 'Level 3',
+  strengthen: 'Strengthen',
+  revise: 'Revise',
+};
+
+function stationDisplay(station: string) {
+  return STATION_DISPLAY[station] ?? station;
+}
+
+function timeAgo(iso: string) {
+  const then = new Date(iso).getTime();
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60_000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} ${hrs === 1 ? 'hour' : 'hours'} ago`;
+  const days = Math.round(hrs / 24);
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [dash, setDash] = useState<ApiDashboard | null>(null);
@@ -49,6 +74,7 @@ export default function DashboardPage() {
 
   const fixFirst = today?.fixQueue[0];
   const fixFirstSubject = fixFirst ? subjectMeta(fixFirst.subjectKey.startsWith('english') ? 'english' : fixFirst.subjectKey).label : '';
+  const recentSessions = today?.recentSessions ?? [];
 
   return (
     <div className="relative flex flex-col lg:flex-row min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: '#F4EFE5' }}>
@@ -210,6 +236,43 @@ export default function DashboardPage() {
             </Link>
           </div>
         </div>
+
+        {/* ── Recently done: the last few completed levels ── */}
+        {recentSessions.length > 0 && (
+          <section className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(0,0,0,0.08)', backdropFilter: 'blur(12px)' }}>
+            <div className="text-xs font-bold mb-3" style={{ color: '#78716c' }}>✅ Recently done</div>
+            <ul className="flex flex-col gap-2">
+              {recentSessions.map((s, i) => {
+                const meta = subjectMeta(s.subjectKey.startsWith('english') ? 'english' : s.subjectKey);
+                return (
+                  <li key={`${s.conceptId}-${s.completedAt}-${i}`} className="flex items-center gap-3">
+                    <div
+                      className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-sm"
+                      style={{ background: `${meta.color}22` }}
+                      title={meta.label}
+                    >
+                      {meta.icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-bold truncate" style={{ color: '#1c1917' }}>{s.conceptName}</div>
+                      <div className="text-xs" style={{ color: '#a8a29e' }}>
+                        {stationDisplay(s.station)} · {timeAgo(s.completedAt)}
+                      </div>
+                    </div>
+                    <div className="flex-shrink-0 flex items-center gap-2">
+                      <span className="text-sm font-bold tabular-nums" style={{ color: s.passed ? COLORS.strong : COLORS.weak }}>
+                        {Math.round(s.score * 100)}%
+                      </span>
+                      <span className="text-sm" title={s.passed ? 'Passed' : 'Needs another go'}>
+                        {s.passed ? '✅' : '🔧'}
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
         {loading && (
           <div className="text-center text-sm" style={{ color: '#a8a29e' }}>Loading your day…</div>
