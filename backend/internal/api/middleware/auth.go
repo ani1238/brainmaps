@@ -135,10 +135,11 @@ func (s *statusRecorder) WriteHeader(code int) {
 // transaction commits on success and rolls back on a panic or 5xx.
 func RLSContext(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uid, _ := r.Context().Value(userIDKey).(string)
 		sid, _ := r.Context().Value(studentIDKey).(string)
-		if sid == "" {
-			// No student bound to this token — nothing to scope; RLS tables will
-			// simply return no rows. Proceed without a transaction.
+		if uid == "" {
+			// Unauthenticated (shouldn't reach here behind RequireAuth) — proceed
+			// without a scoped transaction.
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -153,7 +154,12 @@ func RLSContext(next http.Handler) http.Handler {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if _, err := tx.Exec(r.Context(), "SELECT set_config('app.student_id', $1, true)", sid); err != nil {
+		// Scope this request to its user (auth/identity tables) and student
+		// (per-student data tables) so RLS policies apply.
+		if _, err := tx.Exec(r.Context(),
+			"SELECT set_config('app.user_id', $1, true), set_config('app.student_id', $2, true)",
+			uid, sid,
+		); err != nil {
 			tx.Rollback(r.Context())
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			return

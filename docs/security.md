@@ -61,46 +61,62 @@ methods limited to GET/POST/OPTIONS. In production the browser calls the API
 **same-origin** through the Next.js rewrite (`/api/v1/* → fly`), so no
 cross-origin requests occur. `ALLOWED_ORIGINS` is intentionally unset in prod.
 
-## 6. Row-Level Security — ENABLED
+## 6. Row-Level Security — ENABLED on every table
 
-RLS is **live** on the per-student data tables (`concept_progress`,
-`revise_schedule`, `sessions`, `session_answers`, `student_weak_concepts`,
-`parent_reports`, `study_plans`, `plan_items`, `plan_leaves`) — migration
-`019_rls.sql`, `FORCE ROW LEVEL SECURITY`, policies keyed on a per-request GUC
-`app.student_id` (USING + WITH CHECK).
+RLS is **live and forced on every table**, under the non-bypass `brainmaps_app`
+role, with tiered policies (migrations `019` + `020`):
 
-How the identity is set:
-- **Request path** — `middleware.RLSContext` opens a per-request transaction and
-  runs `SET LOCAL app.student_id = <JWT student id>`; all protected handlers run
-  their queries on that transaction (via the `db.Q(ctx)` querier). Commits on
-  success, rolls back on panic/5xx.
-- **Background** — the async grader and MCQ recompute wrap their DB phases in
-  `db.RunAsStudent(ctx, studentID, …)` (a short transaction with the GUC set;
-  slow AI calls are kept outside it so a pool connection isn't held).
+| Tier | Tables | Policy |
+|---|---|---|
+| Per-student data | concept_progress, revise_schedule, sessions, session_answers, student_weak_concepts, parent_reports, study_plans, plan_items, plan_leaves | `student_id = app_student_id()` (USING + WITH CHECK) |
+| Auth / identity | users, students, auth_sessions, recovery_tokens | `app_user_id() IS NULL OR <owner = app_user_id()>` |
+| Curriculum / reference | subjects, chapters, concepts, questions, mcq_options | `FOR SELECT USING (true)` — global read; writes denied for the app role |
+| Lead capture | leads | `FOR INSERT WITH CHECK (true)` — public insert; reads owner-only |
 
-**Dedicated role (the key piece):** the default Neon role `neondb_owner` has
-`BYPASSRLS`, so policies never apply to it. The app therefore connects as a
-separate **`brainmaps_app`** role — `NOSUPERUSER NOBYPASSRLS`, granted only
-DML + sequence usage. Migrations and admin still use the owner. With this role
-the policies are enforced: verified that with `app.student_id = A`, a query for
-B's rows returns **0**, inserting B's row is **rejected** by `WITH CHECK`, and
-with **no** GUC every protected table returns **0** (fail-closed).
+**Identity GUCs**, set per request by `middleware.RLSContext` inside a
+transaction (`SET LOCAL app.user_id` + `app.student_id`), and by
+`db.RunAsStudent` for background jobs (`app.student_id`):
+- Authenticated requests are scoped to their own user + student rows.
+- **Pre-auth flows** (login, register, refresh, forgot/reset) run with *no*
+  GUC — `app_user_id() IS NULL` — which is the deliberate escape that lets them
+  read a user by email / create accounts before identity exists. This is
+  inherent: the lookup that *establishes* identity can't itself be
+  identity-scoped. `SET LOCAL` is transaction-scoped, so a pooled connection
+  never leaks one request's identity into the next.
 
-**Rollback:** set the `DATABASE_URL` Fly secret back to the owner role (instant —
-owner bypasses RLS), or `ALTER TABLE <t> DISABLE ROW LEVEL SECURITY;` per table.
+**Why a dedicated role:** the default `neondb_owner` has `BYPASSRLS`, so policies
+never apply to it. The app connects as **`brainmaps_app`** (`NOSUPERUSER
+NOBYPASSRLS`, DML + sequence grants only). Migrations/admin still use the owner.
+
+> ⚠️ **Operational note / how login once broke:** if a table has
+> `relrowsecurity = true` but **no policy**, it is **deny-all** for the
+> non-bypass role. Never `ENABLE ROW LEVEL SECURITY` without also creating a
+> policy. Verified end-to-end as `brainmaps_app`: register/login/forgot, all
+> protected reads + writes (incl. session complete → background recompute, plan
+> generate), cross-user 403, and SQL isolation (a scoped user sees only its own
+> user/student rows; pre-auth sees all users so login works).
+
+**Rollback:** point the `DATABASE_URL` Fly secret back at `neondb_owner` (owner
+bypasses RLS — instant), or `ALTER TABLE <t> DISABLE ROW LEVEL SECURITY;`.
 
 ## 7. Backlog / recommendations
 
 - Distributed (per-account) login throttling — current limiter is per-instance
   and per-IP; add per-email backoff for credential-stuffing resistance.
-- Extend RLS to `users`/`students`/`auth_sessions` (needs a bypass path for the
-  pre-auth register/login/reset flows).
+- Consider a separate low-privilege auth role for the pre-auth handlers to
+  remove the `app_user_id() IS NULL` escape on identity tables entirely.
 - Rotate `JWT_SECRET` / DB creds if ever shared; confirm `JWT_SECRET` entropy.
 - Lightweight audit logging for sensitive actions (PIN changes, report access).
 
 ## Changelog
 - 2026-06-25 — Audit + hardening: roles (018), error sanitization, security
   headers, auth rate limiting; RLS staged (019) with rollout plan.
-- 2026-06-25 — RLS **enabled**: dedicated non-bypass `brainmaps_app` role,
-  per-request `app.student_id` (RLSContext) + `db.RunAsStudent` for background
-  jobs; all protected handlers routed through a context querier.
+- 2026-06-25 — RLS **enabled** on per-student tables: dedicated non-bypass
+  `brainmaps_app` role, per-request `app.student_id` (RLSContext) +
+  `db.RunAsStudent` for background jobs; protected handlers routed through a
+  context querier.
+- 2026-06-25 — RLS **completed on every table** (020): auth/identity tables
+  owner-scoped with a pre-auth escape (RLSContext also sets `app.user_id`),
+  curriculum read-only, leads insert-only; stale content-replace backup tables
+  dropped. (Fixes a deny-all login outage caused by tables left RLS-on with no
+  policy.)
