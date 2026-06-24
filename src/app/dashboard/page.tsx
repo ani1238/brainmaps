@@ -245,28 +245,34 @@ export default function DashboardPage() {
               {recentSessions.map((s, i) => {
                 const meta = subjectMeta(s.subjectKey.startsWith('english') ? 'english' : s.subjectKey);
                 return (
-                  <li key={`${s.conceptId}-${s.completedAt}-${i}`} className="flex items-center gap-3">
-                    <div
-                      className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-sm"
-                      style={{ background: `${meta.color}22` }}
-                      title={meta.label}
+                  <li key={`${s.conceptId}-${s.completedAt}-${i}`}>
+                    <Link
+                      href={`/brain-map?conceptId=${s.conceptId}`}
+                      className="flex items-center gap-3 rounded-xl px-2 py-1.5 -mx-2 transition-colors hover:bg-black/[0.04] active:bg-black/[0.06]"
+                      title={`Open ${s.conceptName} on the brain map`}
                     >
-                      {meta.icon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-bold truncate" style={{ color: '#1c1917' }}>{s.conceptName}</div>
-                      <div className="text-xs" style={{ color: '#a8a29e' }}>
-                        {stationDisplay(s.station)} · {timeAgo(s.completedAt)}
+                      <div
+                        className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-sm"
+                        style={{ background: `${meta.color}22` }}
+                      >
+                        {meta.icon}
                       </div>
-                    </div>
-                    <div className="flex-shrink-0 flex items-center gap-2">
-                      <span className="text-sm font-bold tabular-nums" style={{ color: s.passed ? COLORS.strong : COLORS.weak }}>
-                        {Math.round(s.score * 100)}%
-                      </span>
-                      <span className="text-sm" title={s.passed ? 'Passed' : 'Needs another go'}>
-                        {s.passed ? '✅' : '🔧'}
-                      </span>
-                    </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-bold truncate" style={{ color: '#1c1917' }}>{s.conceptName}</div>
+                        <div className="text-xs" style={{ color: '#a8a29e' }}>
+                          {stationDisplay(s.station)} · {timeAgo(s.completedAt)}
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0 flex items-center gap-2">
+                        <span className="text-sm font-bold tabular-nums" style={{ color: s.passed ? COLORS.strong : COLORS.weak }}>
+                          {Math.round(s.score * 100)}%
+                        </span>
+                        <span className="text-sm" title={s.passed ? 'Passed' : 'Needs another go'}>
+                          {s.passed ? '✅' : '🔧'}
+                        </span>
+                        <span className="text-sm" style={{ color: '#d6d3d1' }}>›</span>
+                      </div>
+                    </Link>
                   </li>
                 );
               })}
