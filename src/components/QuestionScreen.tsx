@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import type { Question } from '@/types';
 
 export interface AnswerPayload {
@@ -439,76 +439,19 @@ function FeynmanQuestion({ question, onNext, onSubmitAnswer }: {
   );
 }
 
-// ── Blurt (180s timer) ────────────────────────────────────────────────────
+// ── Blurt (free recall) ─────────────────────────────────────────────────────
 
 function BlurtQuestion({ question, onNext, onSubmitAnswer }: {
   question: Question; onNext: () => void;
   onSubmitAnswer?: (p: AnswerPayload) => void;
 }) {
   const [text, setText] = useState('');
-  const [timeLeft, setTimeLeft] = useState(180);
-  const [active, setActive] = useState(false);
-
-  useEffect(() => {
-    if (!active || timeLeft <= 0) return;
-    const t = setTimeout(() => setTimeLeft(s => s - 1), 1000);
-    return () => clearTimeout(t);
-  }, [active, timeLeft]);
-
-  useEffect(() => {
-    if (timeLeft === 0) onNext();
-  }, [timeLeft, onNext]);
-
-  const progress = (timeLeft / 180) * 100;
-  const r = 40;
-  const circ = 2 * Math.PI * r;
-  const dashOffset = circ * (1 - progress / 100);
-  const mins = Math.floor(timeLeft / 60);
-  const secs = timeLeft % 60;
 
   return (
     <div className="p-5 flex flex-col gap-4">
-      <div className="text-xs font-bold" style={{ color: '#4F46E5' }}>Brain dump — write everything you remember</div>
-
-      <div className="flex items-center gap-4">
-        {/* Timer circle */}
-        <div className="relative w-24 h-24 flex-shrink-0">
-          <svg className="absolute inset-0 -rotate-90" width="96" height="96" viewBox="0 0 96 96">
-            <circle cx="48" cy="48" r={r} fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth="6" />
-            <circle
-              cx="48" cy="48" r={r}
-              fill="none"
-              stroke={timeLeft < 30 ? '#ef4444' : '#4F46E5'}
-              strokeWidth="6"
-              strokeLinecap="round"
-              strokeDasharray={circ}
-              strokeDashoffset={dashOffset}
-              style={{ transition: 'stroke-dashoffset 0.5s linear' }}
-            />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="font-extrabold text-xl" style={{ color: timeLeft < 30 ? '#ef4444' : '#1c1917' }}>
-              {mins}:{secs.toString().padStart(2, '0')}
-            </div>
-            <div className="text-[9px] font-mono" style={{ color: '#78716c' }}>left</div>
-          </div>
-        </div>
-
-        <div>
-          <p className="text-sm leading-relaxed" style={{ color: '#44403c' }}>
-            No hints. No prompts. Just write everything you remember about{' '}
-            <strong>{question.text}</strong>.
-          </p>
-          {!active && (
-            <button
-              onClick={() => setActive(true)}
-              className="mt-2 px-4 py-1.5 rounded-lg text-sm font-bold text-white"
-              style={{ background: '#4F46E5' }}
-            >
-              Start timer
-            </button>
-          )}
-        </div>
+      <div>
+        <div className="text-xs font-bold mb-2" style={{ color: '#78716c' }}>Brain dump — write everything you remember</div>
+        <p className="font-bold text-lg leading-snug" style={{ color: '#1c1917' }}>{question.text}</p>
       </div>
 
       <textarea
