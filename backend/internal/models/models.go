@@ -191,6 +191,7 @@ type SubmitAnswerReq struct {
 	QuestionType QuestionType `json:"questionType"`
 	ChosenOption *string      `json:"chosenOption,omitempty"` // MCQ
 	StudentText  *string      `json:"studentText,omitempty"`  // open-ended
+	ElapsedMs    *int         `json:"elapsedMs,omitempty"`    // time-on-task (ms)
 }
 
 type CompleteSessionReq struct {

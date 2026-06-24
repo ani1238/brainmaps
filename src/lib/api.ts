@@ -217,6 +217,7 @@ export interface ParentReport {
   voice?: { question: string; answer: string; note: string };
   askTonight?: { question: string; hint: string };
   trend?: { recallPct: number; applyPct: number; caption: string };
+  careless?: { conceptGapPct: number; verdict: string };
   effort: { sessions: number; activeDays: number; streak: number; minutes: number };
   mastery: { strong: number; developing: number; weak: number; total: number };
   improving: { name: string; delta: number }[];
@@ -495,6 +496,7 @@ export interface SubmitAnswer {
   questionType: string;
   chosenOption?: string;
   studentText?: string;
+  elapsedMs?: number;
 }
 
 export interface ActiveSession {

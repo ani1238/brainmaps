@@ -226,6 +226,31 @@ function ReportView({ report, onLock }: { report: ParentReport; onLock: () => vo
         </section>
       )}
 
+      {/* Careless vs concept gauge */}
+      {report.careless && (
+        <section className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(0,0,0,0.08)' }}>
+          <div className="text-xs font-bold mb-3" style={{ color: COLORS.weak }}>Is it focus, or understanding?</div>
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] font-semibold flex-none" style={{ color: '#94a8a3' }}>Just rushing</span>
+            <div className="relative flex-1 h-2 rounded-full" style={{ background: 'linear-gradient(90deg, #ebc675, #c2613c)' }}>
+              <span
+                className="absolute top-1/2 w-4 h-4 rounded-full bg-white"
+                style={{
+                  left: `${Math.max(0, Math.min(100, report.careless.conceptGapPct))}%`,
+                  transform: 'translate(-50%, -50%)',
+                  border: '3px solid #c2613c',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+                }}
+              />
+            </div>
+            <span className="text-[10px] font-semibold flex-none" style={{ color: '#94a8a3' }}>Concept gap</span>
+          </div>
+          {report.careless.verdict && (
+            <p className="text-sm leading-relaxed mt-3" style={{ color: '#5e5247' }}>{report.careless.verdict}</p>
+          )}
+        </section>
+      )}
+
       {/* One question to ask tonight */}
       {report.askTonight?.question && (
         <section className="rounded-2xl overflow-hidden" style={{ background: 'rgba(251,241,221,0.9)', border: '1px solid rgba(224,153,46,0.35)' }}>

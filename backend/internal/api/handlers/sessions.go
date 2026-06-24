@@ -117,6 +117,18 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Record per-question time-on-task (drives the careless-vs-concept signal in
+	// the parent report). Done as a follow-up update so it stays independent of
+	// how each answer type is inserted above.
+	for _, ans := range req.Answers {
+		if ans.ElapsedMs != nil {
+			db.Pool.Exec(r.Context(), `
+				UPDATE session_answers SET elapsed_ms = $1
+				WHERE session_id = $2 AND question_id = $3
+			`, *ans.ElapsedMs, sessionID, ans.QuestionID)
+		}
+	}
+
 	// Mark session completed with MCQ-only score for now
 	mcqScore := 0.0
 	if mcqTotal > 0 {
