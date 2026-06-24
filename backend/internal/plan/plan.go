@@ -395,6 +395,76 @@ func MoveItem(ctx context.Context, studentID string, id int64, newDate string) e
 	return err
 }
 
+// CalEntry is one item on the calendar — either a planned concept to learn or a
+// scheduled revision — keyed to a date.
+type CalEntry struct {
+	Date        string `json:"date"`
+	Kind        string `json:"kind"` // learn | revise
+	ItemID      int64  `json:"itemId"`
+	ConceptID   string `json:"conceptId"`
+	ConceptName string `json:"conceptName"`
+	SubjectKey  string `json:"subjectKey"`
+	Status      string `json:"status"`
+}
+
+// Calendar returns both planned learning (plan_items) and scheduled revisions
+// (revise_schedule) for each day in the range, so the calendar can show what is
+// actually planned per day rather than bare dots.
+func Calendar(ctx context.Context, studentID, from, to string) ([]CalEntry, error) {
+	out := []CalEntry{}
+
+	lrows, err := db.Pool.Query(ctx, `
+		SELECT pi.id, pi.ref_id, c.name, pi.subject_key, pi.planned_date, pi.status
+		FROM plan_items pi
+		JOIN concepts c ON c.id = pi.ref_id
+		WHERE pi.student_id = $1 AND pi.kind = 'concept'
+		  AND pi.status <> 'skipped'
+		  AND pi.planned_date BETWEEN $2 AND $3
+		ORDER BY pi.planned_date ASC, pi.order_idx ASC
+	`, studentID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	for lrows.Next() {
+		var e CalEntry
+		var d time.Time
+		if err := lrows.Scan(&e.ItemID, &e.ConceptID, &e.ConceptName, &e.SubjectKey, &d, &e.Status); err != nil {
+			continue
+		}
+		e.Kind = "learn"
+		e.Date = d.Format("2006-01-02")
+		out = append(out, e)
+	}
+	lrows.Close()
+
+	rrows, err := db.Pool.Query(ctx, `
+		SELECT rs.concept_id, c.name, c.subject_key, rs.next_due_at
+		FROM revise_schedule rs
+		JOIN concepts c ON c.id = rs.concept_id
+		JOIN concept_progress cp ON cp.concept_id = rs.concept_id AND cp.student_id = rs.student_id
+		WHERE rs.student_id = $1
+		  AND rs.next_due_at::date BETWEEN $2 AND $3
+		  AND cp.revise_unlocked AND cp.revise_state <> 'needs_fixing'
+		ORDER BY rs.next_due_at ASC
+	`, studentID, from, to)
+	if err != nil {
+		return out, nil // learn data already gathered; revise is best-effort
+	}
+	for rrows.Next() {
+		var e CalEntry
+		var d time.Time
+		if err := rrows.Scan(&e.ConceptID, &e.ConceptName, &e.SubjectKey, &d); err != nil {
+			continue
+		}
+		e.Kind = "revise"
+		e.Date = d.Format("2006-01-02")
+		out = append(out, e)
+	}
+	rrows.Close()
+
+	return out, nil
+}
+
 // SkipItem marks a plan item skipped.
 func SkipItem(ctx context.Context, studentID string, id int64) error {
 	_, err := db.Pool.Exec(ctx, `

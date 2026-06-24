@@ -791,3 +791,20 @@ export async function removeLeave(id: number): Promise<void> {
   });
   if (!res.ok) throw new Error(`removeLeave ${res.status}`);
 }
+
+export interface CalEntry {
+  date: string;
+  kind: 'learn' | 'revise';
+  itemId: number;
+  conceptId: string;
+  conceptName: string;
+  subjectKey: string;
+  status: string;
+}
+
+export async function fetchCalendar(from: string, to: string): Promise<CalEntry[]> {
+  const res = await authedFetch(`${API_BASE}/plan/calendar?from=${from}&to=${to}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`fetchCalendar ${res.status}`);
+  const d = await res.json();
+  return d.entries ?? [];
+}

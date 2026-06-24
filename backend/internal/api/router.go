@@ -74,6 +74,7 @@ func NewRouter() http.Handler {
 			r.Post("/plan/settings", handlers.SavePlanSettings)
 			r.Get("/plan/agenda", handlers.GetAgenda)
 			r.Get("/plan/items", handlers.GetPlanItems)
+			r.Get("/plan/calendar", handlers.GetCalendar)
 			r.Post("/plan/item/move", handlers.MovePlanItem)
 			r.Post("/plan/item/skip", handlers.SkipPlanItem)
 			r.Post("/plan/reflow", handlers.ReflowPlan)

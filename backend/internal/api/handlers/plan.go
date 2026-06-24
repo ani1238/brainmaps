@@ -123,6 +123,28 @@ func GetPlanItems(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"items": items})
 }
 
+// GET /api/v1/plan/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD — learn + revise per day.
+func GetCalendar(w http.ResponseWriter, r *http.Request) {
+	studentID, ok := studentFromReq(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	if from == "" || to == "" {
+		now := time.Now()
+		from = now.AddDate(0, 0, -7).Format("2006-01-02")
+		to = now.AddDate(0, 0, 35).Format("2006-01-02")
+	}
+	entries, err := plan.Calendar(r.Context(), studentID, from, to)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"entries": entries})
+}
+
 type itemMoveReq struct {
 	ID   int64  `json:"id"`
 	Date string `json:"date"`

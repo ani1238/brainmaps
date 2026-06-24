@@ -8,9 +8,9 @@ import { COLORS, SUBJECT_MAP } from '@/lib/tokens';
 import { assessmentHref } from '@/lib/navigation';
 import { useProfile } from '@/lib/storage';
 import {
-  fetchPlan, generatePlan, fetchAgenda, fetchPlanItems, fetchLeaves,
-  addLeave, removeLeave, reflowPlan,
-  type PlanState, type Agenda, type PlanItem, type PlanLeave,
+  fetchPlan, generatePlan, fetchAgenda, fetchCalendar, fetchLeaves,
+  addLeave, removeLeave, reflowPlan, movePlanItem, skipPlanItem,
+  type PlanState, type Agenda, type CalEntry, type PlanLeave,
 } from '@/lib/api';
 
 function subjectMeta(key: string) {
@@ -22,6 +22,10 @@ function ymd(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 function todayYmd() { return ymd(new Date()); }
+function prettyDate(s: string) {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+}
 
 const STATION_LABEL: Record<string, string> = {
   level1: 'Level 1', level2: 'Level 2', level3: 'Level 3', strengthen: 'Strengthen', revise: 'Revise',
@@ -33,11 +37,12 @@ export default function PlanPage() {
 
   const [plan, setPlan] = useState<PlanState | null>(null);
   const [agenda, setAgenda] = useState<Agenda | null>(null);
-  const [items, setItems] = useState<PlanItem[]>([]);
+  const [cal, setCal] = useState<CalEntry[]>([]);
   const [leaves, setLeaves] = useState<PlanLeave[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [monthCursor, setMonthCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [selectedDate, setSelectedDate] = useState<string>(todayYmd());
 
   const monthRange = useMemo(() => {
     const first = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1);
@@ -45,16 +50,19 @@ export default function PlanPage() {
     return { from: ymd(first), to: ymd(last) };
   }, [monthCursor]);
 
+  const loadCalendar = useCallback(() => {
+    fetchCalendar(monthRange.from, monthRange.to).then(setCal).catch(() => {});
+  }, [monthRange.from, monthRange.to]);
+
   const refreshActive = useCallback(async () => {
-    const [a, it, lv] = await Promise.all([
+    const [a, lv] = await Promise.all([
       fetchAgenda().catch(() => null),
-      fetchPlanItems(monthRange.from, monthRange.to).catch(() => [] as PlanItem[]),
       fetchLeaves().catch(() => [] as PlanLeave[]),
     ]);
     if (a) setAgenda(a);
-    setItems(it);
     setLeaves(lv);
-  }, [monthRange.from, monthRange.to]);
+    loadCalendar();
+  }, [loadCalendar]);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,26 +72,24 @@ export default function PlanPage() {
         if (cancelled) return;
         setPlan(p);
         if (p.hasPlan) await refreshActive();
-      } catch { /* unauthenticated handled by AuthGate */ }
+      } catch { /* AuthGate handles unauthenticated */ }
       finally { if (!cancelled) setLoading(false); }
     })();
     return () => { cancelled = true; };
   }, [refreshActive]);
 
-  // Re-fetch calendar items when the visible month changes (after a plan exists).
   useEffect(() => {
-    if (!plan?.hasPlan) return;
-    fetchPlanItems(monthRange.from, monthRange.to).then(setItems).catch(() => {});
-  }, [plan?.hasPlan, monthRange.from, monthRange.to]);
+    if (plan?.hasPlan) loadCalendar();
+  }, [plan?.hasPlan, loadCalendar]);
 
   async function onCreatePlan() {
     setBusy(true);
-    try {
-      const p = await generatePlan();
-      setPlan(p);
-      await refreshActive();
-    } finally { setBusy(false); }
+    try { const p = await generatePlan(); setPlan(p); await refreshActive(); }
+    finally { setBusy(false); }
   }
+
+  const selectedEntries = useMemo(() => cal.filter(e => e.date === selectedDate), [cal, selectedDate]);
+  const onLeaveSelected = useMemo(() => leaves.some(l => selectedDate >= l.startDate && selectedDate <= l.endDate), [leaves, selectedDate]);
 
   return (
     <div className="relative flex flex-col lg:flex-row min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: '#F4EFE5' }}>
@@ -99,30 +105,37 @@ export default function PlanPage() {
 
         {loading && <div className="text-sm" style={{ color: '#a8a29e' }}>Loading your plan…</div>}
 
-        {!loading && plan && !plan.hasPlan && (
-          <NoPlan busy={busy} onCreate={onCreatePlan} />
-        )}
+        {!loading && plan && !plan.hasPlan && <NoPlan busy={busy} onCreate={onCreatePlan} />}
 
         {!loading && plan?.hasPlan && (
           <>
             {agenda && <AgendaCard agenda={agenda} onStart={(href) => router.push(href)} />}
-            <CalendarCard
-              monthCursor={monthCursor}
-              setMonthCursor={setMonthCursor}
-              items={items}
-              leaves={leaves}
-            />
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <CalendarCard
+                monthCursor={monthCursor}
+                setMonthCursor={setMonthCursor}
+                entries={cal}
+                leaves={leaves}
+                selectedDate={selectedDate}
+                onSelectDate={setSelectedDate}
+              />
+              <DayDetail
+                date={selectedDate}
+                entries={selectedEntries}
+                onLeave={onLeaveSelected}
+                busy={busy}
+                onStart={(href) => router.push(href)}
+                onMove={async (id, date) => { setBusy(true); try { await movePlanItem(id, date); loadCalendar(); await fetchAgenda().then(setAgenda).catch(() => {}); } finally { setBusy(false); } }}
+                onSkip={async (id) => { setBusy(true); try { await skipPlanItem(id); loadCalendar(); await fetchAgenda().then(setAgenda).catch(() => {}); } finally { setBusy(false); } }}
+              />
+            </div>
+
             <LeaveCard
               leaves={leaves}
               busy={busy}
-              onAdd={async (s, e, reason) => {
-                setBusy(true);
-                try { await addLeave(s, e, reason); await refreshActive(); } finally { setBusy(false); }
-              }}
-              onRemove={async (id) => {
-                setBusy(true);
-                try { await removeLeave(id); await refreshActive(); } finally { setBusy(false); }
-              }}
+              onAdd={async (s, e, reason) => { setBusy(true); try { await addLeave(s, e, reason); await refreshActive(); } finally { setBusy(false); } }}
+              onRemove={async (id) => { setBusy(true); try { await removeLeave(id); await refreshActive(); } finally { setBusy(false); } }}
             />
             <ToolsCard
               busy={busy}
@@ -147,12 +160,9 @@ function NoPlan({ busy, onCreate }: { busy: boolean; onCreate: () => void }) {
         so it never feels like a lot. You can move things around to match your school, and if
         you take a break your revisions won&apos;t pile up. ✨
       </p>
-      <button
-        onClick={onCreate}
-        disabled={busy}
+      <button onClick={onCreate} disabled={busy}
         className="px-5 py-3 rounded-xl font-bold text-sm text-white disabled:opacity-60"
-        style={{ background: COLORS.indigo }}
-      >
+        style={{ background: COLORS.indigo }}>
         {busy ? 'Building your plan…' : '✨ Create my plan'}
       </button>
     </section>
@@ -176,37 +186,16 @@ function AgendaCard({ agenda, onStart }: { agenda: Agenda; onStart: (href: strin
       {agenda.onLeave ? (
         <div className="text-sm" style={{ color: '#78716c' }}>You&apos;re on a break — nothing due. 🌴</div>
       ) : (
-        <div className="flex flex-col gap-4">
-          <AgendaGroup
-            title="📘 Learn" color={COLORS.indigo}
-            empty="No new concepts today."
-            rows={agenda.learn.map(l => ({
-              key: l.conceptId, name: l.conceptName, subject: l.subjectKey,
-              meta: l.overdue ? 'carried over' : 'new today',
-              href: assessmentHref('/sharpen', { conceptId: l.conceptId, level: 'level1' }, '/plan'),
-            }))}
-            total={agenda.learnTotal} onStart={onStart}
-          />
-          <AgendaGroup
-            title="🔧 Fix" color={COLORS.weak}
-            empty="Nothing to fix — strong work! 💪"
-            rows={agenda.fix.map(f => ({
-              key: f.conceptId, name: f.conceptName, subject: f.subjectKey,
-              meta: STATION_LABEL[f.level] ?? f.level,
-              href: assessmentHref('/sharpen', { conceptId: f.conceptId, level: f.level }, '/plan'),
-            }))}
-            total={agenda.fixTotal} onStart={onStart}
-          />
-          <AgendaGroup
-            title="🔄 Revise" color={COLORS.strong}
-            empty="Nothing due for revision."
-            rows={agenda.revise.map(rv => ({
-              key: rv.conceptId, name: rv.conceptName, subject: rv.subjectKey,
-              meta: 'quick check',
-              href: assessmentHref('/sharpen', { conceptId: rv.conceptId, level: 'revise' }, '/plan'),
-            }))}
-            total={agenda.reviseTotal} onStart={onStart}
-          />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <AgendaGroup title="📘 Learn" color={COLORS.indigo} empty="No new concepts today."
+            rows={agenda.learn.map(l => ({ key: l.conceptId, name: l.conceptName, subject: l.subjectKey, meta: l.overdue ? 'carried over' : 'new today', href: assessmentHref('/sharpen', { conceptId: l.conceptId, level: 'level1' }, '/plan') }))}
+            total={agenda.learnTotal} onStart={onStart} />
+          <AgendaGroup title="🔧 Fix" color={COLORS.weak} empty="Nothing to fix — strong work! 💪"
+            rows={agenda.fix.map(f => ({ key: f.conceptId, name: f.conceptName, subject: f.subjectKey, meta: STATION_LABEL[f.level] ?? f.level, href: assessmentHref('/sharpen', { conceptId: f.conceptId, level: f.level }, '/plan') }))}
+            total={agenda.fixTotal} onStart={onStart} />
+          <AgendaGroup title="🔄 Revise" color={COLORS.strong} empty="Nothing due for revision."
+            rows={agenda.revise.map(rv => ({ key: rv.conceptId, name: rv.conceptName, subject: rv.subjectKey, meta: 'quick check', href: assessmentHref('/sharpen', { conceptId: rv.conceptId, level: 'revise' }, '/plan') }))}
+            total={agenda.reviseTotal} onStart={onStart} />
         </div>
       )}
     </section>
@@ -223,9 +212,7 @@ function AgendaGroup({ title, color, rows, empty, total, onStart }: {
       <div className="flex items-center gap-2 mb-2">
         <div className="text-xs font-bold" style={{ color }}>{title}</div>
         {total > rows.length && (
-          <div className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,0.05)', color: '#78716c' }}>
-            {rows.length} of {total} shown
-          </div>
+          <div className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(0,0,0,0.05)', color: '#78716c' }}>+{total - rows.length}</div>
         )}
       </div>
       {rows.length === 0 ? (
@@ -236,16 +223,13 @@ function AgendaGroup({ title, color, rows, empty, total, onStart }: {
             const meta = subjectMeta(r.subject);
             return (
               <li key={r.key}>
-                <button
-                  onClick={() => onStart(r.href)}
-                  className="w-full flex items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-black/[0.04] active:bg-black/[0.06]"
-                >
-                  <span className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-sm" style={{ background: `${meta.color}22` }}>{meta.icon}</span>
+                <button onClick={() => onStart(r.href)}
+                  className="w-full flex items-center gap-2 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-black/[0.04] active:bg-black/[0.06]">
+                  <span className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-xs" style={{ background: `${meta.color}22` }}>{meta.icon}</span>
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-bold truncate" style={{ color: '#1c1917' }}>{r.name}</span>
-                    <span className="block text-xs" style={{ color: '#a8a29e' }}>{meta.label} · {r.meta}</span>
+                    <span className="block text-[11px]" style={{ color: '#a8a29e' }}>{meta.label}</span>
                   </span>
-                  <span className="flex-shrink-0 text-sm font-bold" style={{ color }}>Start ▸</span>
                 </button>
               </li>
             );
@@ -257,8 +241,9 @@ function AgendaGroup({ title, color, rows, empty, total, onStart }: {
 }
 
 // ── Calendar ──────────────────────────────────────────────────────────────────
-function CalendarCard({ monthCursor, setMonthCursor, items, leaves }: {
-  monthCursor: Date; setMonthCursor: (d: Date) => void; items: PlanItem[]; leaves: PlanLeave[];
+function CalendarCard({ monthCursor, setMonthCursor, entries, leaves, selectedDate, onSelectDate }: {
+  monthCursor: Date; setMonthCursor: (d: Date) => void; entries: CalEntry[]; leaves: PlanLeave[];
+  selectedDate: string; onSelectDate: (d: string) => void;
 }) {
   const year = monthCursor.getFullYear();
   const month = monthCursor.getMonth();
@@ -268,10 +253,10 @@ function CalendarCard({ monthCursor, setMonthCursor, items, leaves }: {
   const today = todayYmd();
 
   const byDate = useMemo(() => {
-    const m: Record<string, PlanItem[]> = {};
-    for (const it of items) (m[it.plannedDate] ??= []).push(it);
+    const m: Record<string, CalEntry[]> = {};
+    for (const e of entries) (m[e.date] ??= []).push(e);
     return m;
-  }, [items]);
+  }, [entries]);
 
   function isLeave(dateStr: string) {
     return leaves.some(l => dateStr >= l.startDate && dateStr <= l.endDate);
@@ -297,40 +282,145 @@ function CalendarCard({ monthCursor, setMonthCursor, items, leaves }: {
         {cells.map((d, i) => {
           if (d === null) return <div key={`e${i}`} />;
           const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-          const dayItems = (byDate[dateStr] ?? []).filter(it => it.status !== 'skipped');
+          const dayEntries = byDate[dateStr] ?? [];
+          const learn = dayEntries.filter(e => e.kind === 'learn');
+          const revise = dayEntries.filter(e => e.kind === 'revise');
           const leave = isLeave(dateStr);
           const isToday = dateStr === today;
-          const subjects = Array.from(new Set(dayItems.map(it => it.subjectKey))).slice(0, 4);
+          const selected = dateStr === selectedDate;
+          const subjects = Array.from(new Set(learn.map(e => e.subjectKey))).slice(0, 4);
           return (
-            <div
+            <button
               key={dateStr}
-              className="aspect-square rounded-lg p-1 flex flex-col items-center justify-start text-[10px]"
+              onClick={() => onSelectDate(dateStr)}
+              className="aspect-square rounded-lg p-1 flex flex-col items-stretch text-[10px] transition-all hover:brightness-95"
               style={{
-                background: leave ? 'rgba(168,162,158,0.18)' : dayItems.length ? 'rgba(79,70,229,0.06)' : 'transparent',
-                border: isToday ? `1.5px solid ${COLORS.indigo}` : '1px solid rgba(0,0,0,0.05)',
+                background: leave ? 'rgba(168,162,158,0.18)' : dayEntries.length ? 'rgba(79,70,229,0.06)' : 'rgba(255,255,255,0.4)',
+                border: selected ? `2px solid ${COLORS.indigo}` : isToday ? `1.5px solid ${COLORS.indigo}88` : '1px solid rgba(0,0,0,0.05)',
               }}
-              title={leave ? 'On leave' : dayItems.map(it => it.conceptName).join(', ')}
+              title={leave ? 'On leave' : dayEntries.map(e => `${e.kind === 'revise' ? '🔄 ' : ''}${e.conceptName}`).join(', ')}
             >
-              <div className="font-bold" style={{ color: isToday ? COLORS.indigo : '#57534e' }}>{d}</div>
+              <div className="font-bold self-end pr-0.5" style={{ color: isToday ? COLORS.indigo : '#57534e' }}>{d}</div>
               {leave ? (
-                <div className="text-[9px] mt-auto">🌴</div>
+                <div className="flex-1 flex items-center justify-center text-[11px]">🌴</div>
               ) : (
-                <div className="flex flex-wrap gap-0.5 justify-center mt-0.5">
-                  {subjects.map(s => (
-                    <span key={s} className="w-1.5 h-1.5 rounded-full" style={{ background: subjectMeta(s).color }} />
-                  ))}
-                  {dayItems.length > 0 && <span className="w-full text-center text-[8px]" style={{ color: '#a8a29e' }}>{dayItems.length}</span>}
+                <div className="flex-1 flex flex-col items-center justify-center gap-0.5">
+                  <div className="flex flex-wrap gap-0.5 justify-center">
+                    {subjects.map(s => <span key={s} className="w-1.5 h-1.5 rounded-full" style={{ background: subjectMeta(s).color }} />)}
+                  </div>
+                  <div className="flex gap-1 leading-none">
+                    {learn.length > 0 && <span className="text-[8px] font-bold" style={{ color: COLORS.indigo }}>📘{learn.length}</span>}
+                    {revise.length > 0 && <span className="text-[8px] font-bold" style={{ color: COLORS.strong }}>🔄{revise.length}</span>}
+                  </div>
                 </div>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
       <div className="mt-3 text-[10px] flex items-center gap-3 flex-wrap" style={{ color: '#a8a29e' }}>
-        <span>● planned concepts (colored by subject)</span>
-        <span>🌴 leave</span>
+        <span>📘 learn</span><span>🔄 revise</span><span>🌴 leave</span><span>· tap a day to see &amp; plan</span>
       </div>
     </section>
+  );
+}
+
+// ── Day detail (view + rearrange) ─────────────────────────────────────────────
+function DayDetail({ date, entries, onLeave, busy, onStart, onMove, onSkip }: {
+  date: string; entries: CalEntry[]; onLeave: boolean; busy: boolean;
+  onStart: (href: string) => void;
+  onMove: (id: number, date: string) => void;
+  onSkip: (id: number) => void;
+}) {
+  const learn = entries.filter(e => e.kind === 'learn');
+  const revise = entries.filter(e => e.kind === 'revise');
+
+  return (
+    <section className="rounded-2xl p-4 lg:p-5 flex flex-col" style={{ background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(0,0,0,0.08)' }}>
+      <div className="text-xs font-bold" style={{ color: '#78716c' }}>Selected day</div>
+      <div className="text-lg font-extrabold mb-3" style={{ color: '#1c1917' }}>{prettyDate(date)}</div>
+
+      {onLeave && (
+        <div className="text-sm mb-3 px-3 py-2 rounded-xl" style={{ background: 'rgba(168,162,158,0.15)', color: '#78716c' }}>🌴 On a break — plan paused this day.</div>
+      )}
+
+      {learn.length === 0 && revise.length === 0 && !onLeave && (
+        <div className="text-sm" style={{ color: '#a8a29e' }}>
+          Nothing planned for this day. Open a busier day and use <strong>Move</strong> to bring a concept here.
+        </div>
+      )}
+
+      {learn.length > 0 && (
+        <div className="mb-4">
+          <div className="text-xs font-bold mb-2" style={{ color: COLORS.indigo }}>📘 Learn ({learn.length})</div>
+          <ul className="flex flex-col gap-2">
+            {learn.map(e => <DayLearnRow key={e.itemId} e={e} busy={busy} onStart={onStart} onMove={onMove} onSkip={onSkip} />)}
+          </ul>
+        </div>
+      )}
+
+      {revise.length > 0 && (
+        <div>
+          <div className="text-xs font-bold mb-2" style={{ color: COLORS.strong }}>🔄 Revise ({revise.length})</div>
+          <ul className="flex flex-col gap-1.5">
+            {revise.map(e => {
+              const meta = subjectMeta(e.subjectKey);
+              return (
+                <li key={`r-${e.conceptId}`}>
+                  <button onClick={() => onStart(assessmentHref('/sharpen', { conceptId: e.conceptId, level: 'revise' }, '/plan'))}
+                    className="w-full flex items-center gap-2 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-black/[0.04]">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-xs" style={{ background: `${meta.color}22` }}>{meta.icon}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-bold truncate" style={{ color: '#1c1917' }}>{e.conceptName}</span>
+                      <span className="block text-[11px]" style={{ color: '#a8a29e' }}>{meta.label} · quick check</span>
+                    </span>
+                    <span className="flex-shrink-0 text-sm font-bold" style={{ color: COLORS.strong }}>Start ▸</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DayLearnRow({ e, busy, onStart, onMove, onSkip }: {
+  e: CalEntry; busy: boolean;
+  onStart: (href: string) => void; onMove: (id: number, date: string) => void; onSkip: (id: number) => void;
+}) {
+  const meta = subjectMeta(e.subjectKey);
+  const [moving, setMoving] = useState(false);
+  const [newDate, setNewDate] = useState(e.date);
+  return (
+    <li className="rounded-xl px-2 py-1.5" style={{ background: 'rgba(0,0,0,0.02)' }}>
+      <div className="flex items-center gap-2">
+        <span className="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-xs" style={{ background: `${meta.color}22` }}>{meta.icon}</span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-sm font-bold truncate" style={{ color: '#1c1917' }}>{e.conceptName}</span>
+          <span className="block text-[11px]" style={{ color: '#a8a29e' }}>{meta.label}</span>
+        </span>
+        <button onClick={() => onStart(assessmentHref('/sharpen', { conceptId: e.conceptId, level: 'level1' }, '/plan'))}
+          className="flex-shrink-0 text-xs font-bold px-2 py-1 rounded-lg text-white" style={{ background: COLORS.indigo }}>Start</button>
+      </div>
+      <div className="flex items-center gap-2 mt-1.5 pl-8">
+        {moving ? (
+          <>
+            <input type="date" value={newDate} onChange={ev => setNewDate(ev.target.value)}
+              className="px-2 py-1 rounded-lg text-xs" style={{ border: '1px solid rgba(0,0,0,0.15)', color: '#1c1917' }} />
+            <button disabled={busy} onClick={() => { onMove(e.itemId, newDate); setMoving(false); }}
+              className="text-xs font-bold px-2 py-1 rounded-lg disabled:opacity-60" style={{ background: 'rgba(79,70,229,0.12)', color: COLORS.indigoDeep }}>Save</button>
+            <button onClick={() => setMoving(false)} className="text-xs font-bold" style={{ color: '#a8a29e' }}>Cancel</button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => setMoving(true)} className="text-xs font-bold" style={{ color: COLORS.indigo }}>📅 Move</button>
+            <button disabled={busy} onClick={() => onSkip(e.itemId)} className="text-xs font-bold disabled:opacity-60" style={{ color: '#a8a29e' }}>Skip</button>
+          </>
+        )}
+      </div>
+    </li>
   );
 }
 
@@ -351,26 +441,16 @@ function LeaveCard({ leaves, busy, onAdd, onRemove }: {
         Mark your off days and I&apos;ll pause the plan — your revisions get spread out gently so nothing piles up when you&apos;re back.
       </p>
       <div className="flex flex-wrap items-end gap-2 mb-3">
-        <label className="flex flex-col text-[11px] font-bold" style={{ color: '#78716c' }}>
-          From
+        <label className="flex flex-col text-[11px] font-bold" style={{ color: '#78716c' }}>From
           <input type="date" value={start} onChange={e => setStart(e.target.value)} className="mt-0.5 px-2 py-1.5 rounded-lg text-sm" style={{ border: '1px solid rgba(0,0,0,0.15)', color: '#1c1917' }} />
         </label>
-        <label className="flex flex-col text-[11px] font-bold" style={{ color: '#78716c' }}>
-          To
+        <label className="flex flex-col text-[11px] font-bold" style={{ color: '#78716c' }}>To
           <input type="date" value={end} onChange={e => setEnd(e.target.value)} className="mt-0.5 px-2 py-1.5 rounded-lg text-sm" style={{ border: '1px solid rgba(0,0,0,0.15)', color: '#1c1917' }} />
         </label>
-        <input
-          value={reason} onChange={e => setReason(e.target.value)} placeholder="reason (optional)"
-          className="flex-1 min-w-[120px] px-2 py-1.5 rounded-lg text-sm" style={{ border: '1px solid rgba(0,0,0,0.15)', color: '#1c1917' }}
-        />
-        <button
-          onClick={() => onAdd(start, end, reason)}
-          disabled={busy}
-          className="px-4 py-2 rounded-xl font-bold text-sm text-white disabled:opacity-60"
-          style={{ background: COLORS.indigo }}
-        >
-          Add break
-        </button>
+        <input value={reason} onChange={e => setReason(e.target.value)} placeholder="reason (optional)"
+          className="flex-1 min-w-[120px] px-2 py-1.5 rounded-lg text-sm" style={{ border: '1px solid rgba(0,0,0,0.15)', color: '#1c1917' }} />
+        <button onClick={() => onAdd(start, end, reason)} disabled={busy}
+          className="px-4 py-2 rounded-xl font-bold text-sm text-white disabled:opacity-60" style={{ background: COLORS.indigo }}>Add break</button>
       </div>
       {leaves.length > 0 && (
         <ul className="flex flex-col gap-1.5">
@@ -394,12 +474,8 @@ function ToolsCard({ busy, onReflow, onRegenerate }: { busy: boolean; onReflow: 
         <div className="text-sm font-extrabold" style={{ color: '#1c1917' }}>Tidy up</div>
         <div className="text-xs" style={{ color: '#78716c' }}>Spread out a backlog, or rebuild the whole plan from scratch.</div>
       </div>
-      <button onClick={onReflow} disabled={busy} className="px-4 py-2 rounded-xl font-bold text-sm disabled:opacity-60" style={{ background: 'rgba(79,70,229,0.1)', color: COLORS.indigoDeep }}>
-        🧹 Tidy my revisions
-      </button>
-      <button onClick={onRegenerate} disabled={busy} className="px-4 py-2 rounded-xl font-bold text-sm disabled:opacity-60" style={{ background: 'rgba(0,0,0,0.05)', color: '#57534e' }}>
-        ↻ Rebuild plan
-      </button>
+      <button onClick={onReflow} disabled={busy} className="px-4 py-2 rounded-xl font-bold text-sm disabled:opacity-60" style={{ background: 'rgba(79,70,229,0.1)', color: COLORS.indigoDeep }}>🧹 Tidy my revisions</button>
+      <button onClick={onRegenerate} disabled={busy} className="px-4 py-2 rounded-xl font-bold text-sm disabled:opacity-60" style={{ background: 'rgba(0,0,0,0.05)', color: '#57534e' }}>↻ Rebuild plan</button>
     </section>
   );
 }
