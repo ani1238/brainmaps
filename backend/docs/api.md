@@ -169,7 +169,7 @@ Submits all answers for a session. Returns immediately with the MCQ score; AI gr
 | Field | Notes |
 |---|---|
 | `score` | MCQ-only score (0–1). Updated to include AI scores asynchronously. |
-| `passed` | `true` if score ≥ 0.80 |
+| `passed` | `true` if score ≥ 0.60 and the station cleared |
 | `newState` | Student's mastery state after this session |
 | `aiGrading` | `true` = FEYNMAN/BLURT/ACTIVE_RECALL answers are being graded async |
 

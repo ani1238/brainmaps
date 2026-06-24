@@ -25,6 +25,10 @@ import { assessmentHref, assessmentReturn, failedStation } from '@/lib/navigatio
 
 const Q_TYPE_LABEL: Record<string, string> = {
   MCQ:                   'Multiple choice',
+  STORY_MCQ:             'Story choice',
+  HOTS:                  'Think deeper',
+  HOTS_MCQ:              'Think deeper',
+  ASSERTION_REASON:      'Assertion reason',
   FEYNMAN:               'Explain it simply',
   BLURT:                 'Brain dump',
   ACTIVE_RECALL:         'Apply it',

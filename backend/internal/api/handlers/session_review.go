@@ -47,7 +47,7 @@ func GetSessionReview(w http.ResponseWriter, r *http.Request) {
 		SELECT COUNT(*)
 		FROM session_answers
 		WHERE session_id = $1
-		  AND question_type <> 'MCQ'
+		  AND question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
 		  AND student_text IS NOT NULL
 		  AND ai_graded_at IS NULL
 	`, sessionID).Scan(&ungraded); err != nil {

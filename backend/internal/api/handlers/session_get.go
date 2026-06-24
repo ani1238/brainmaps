@@ -35,14 +35,14 @@ func GetSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Count open answers that an AI provider hasn't graded yet. This MUST match the
-	// grader's filter (grade.GradeOpenAnswers) — every non-MCQ answer with text
-	// — or polling stops early for the newer types (GENERATIVE_PRODUCTION, etc.)
+	// grader's filter (grade.GradeOpenAnswers), or polling stops early for newer
+	// open-answer types and freezes on the provisional option-only score.
 	// and the results screen freezes on the provisional MCQ-only score.
 	var ungradedCount int
 	db.Pool.QueryRow(r.Context(), `
 		SELECT COUNT(*) FROM session_answers
 		WHERE session_id    = $1
-		  AND question_type <> 'MCQ'
+		  AND question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
 		  AND student_text  IS NOT NULL
 		  AND ai_graded_at  IS NULL
 	`, sessionID).Scan(&ungradedCount)
@@ -62,7 +62,7 @@ func GetSession(w http.ResponseWriter, r *http.Request) {
 	// The station gate can demote, never promote: a high-scoring retry that
 	// missed its targeted weak tags stays needs_fixing and must not show as
 	// passed. Only checked once grading (and thus the recompute) is final.
-	passed := currentScore >= 0.80
+	passed := currentScore >= 0.60
 	if ungradedCount == 0 {
 		passed = passed && stationCleared(r.Context(), sessionID)
 	}

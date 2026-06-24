@@ -82,8 +82,7 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 	hasOpenAnswers := false
 
 	for _, ans := range req.Answers {
-		switch ans.QuestionType {
-		case models.MCQ:
+		if isOptionQuestion(ans.QuestionType) {
 			if ans.ChosenOption == nil {
 				continue
 			}
@@ -103,8 +102,11 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 			if correct {
 				mcqCorrect++
 			}
+			continue
+		}
 
-		default: // DESCRIPTIVE, FEYNMAN, BLURT, ACTIVE_RECALL
+		switch ans.QuestionType {
+		default: // DESCRIPTIVE, FEYNMAN, BLURT, ACTIVE_RECALL, etc.
 			if ans.StudentText == nil || *ans.StudentText == "" {
 				continue
 			}
@@ -140,7 +142,7 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 		WHERE id = $5
 	`, time.Now(), mcqCorrect, mcqTotal, mcqScore, sessionID)
 
-	passed := mcqScore >= 0.80
+	passed := mcqScore >= 0.60
 	if hasOpenAnswers {
 		// Async: grade open answers, then recompute EMA. The client polls
 		// GetSession for the authoritative score and passed flag.
@@ -168,4 +170,13 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 		AIGrading:       hasOpenAnswers,
 		ReviewAvailable: !hasOpenAnswers,
 	})
+}
+
+func isOptionQuestion(qType models.QuestionType) bool {
+	switch qType {
+	case models.MCQ, models.StoryMCQ, models.HOTSMCQ, models.AssertionReason:
+		return true
+	default:
+		return false
+	}
 }
