@@ -53,9 +53,10 @@ func SetParentPin(w http.ResponseWriter, r *http.Request) {
 	var existing *string
 	db.Pool.QueryRow(r.Context(), `SELECT parent_pin_hash FROM users WHERE id = $1`, userID).Scan(&existing)
 	if existing != nil && *existing != "" {
-		// Changing an existing PIN requires the current one.
+		// Changing an existing PIN requires the current one. 403 (not 401) so the
+		// client's expired-session logout logic doesn't trigger on a wrong PIN.
 		if !verifyPassword(req.CurrentPin, *existing) {
-			http.Error(w, "current PIN is incorrect", http.StatusUnauthorized)
+			http.Error(w, "current PIN is incorrect", http.StatusForbidden)
 			return
 		}
 	}
@@ -199,7 +200,9 @@ func reportStudentForPin(ctx context.Context, userID, pin string) (string, int, 
 		return "", http.StatusBadRequest, "parent PIN not set"
 	}
 	if !verifyPassword(pin, *pinHash) {
-		return "", http.StatusUnauthorized, "incorrect PIN"
+		// 403 (not 401): a wrong parent PIN must NOT look like an expired session,
+		// or the client's authedFetch would log the whole account out.
+		return "", http.StatusForbidden, "incorrect PIN"
 	}
 	studentID, ok := authmw.StudentForUser(ctx)
 	if !ok {
