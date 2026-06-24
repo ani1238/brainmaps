@@ -81,7 +81,7 @@ export default function DashboardPage() {
       <GridBackground />
       <LeftRail sharpenCount={fixCount} recallCount={reviseCount} streak={dash?.streak.days ?? 0} />
 
-      <main className="relative flex-1 lg:overflow-hidden px-4 lg:px-8 py-4 lg:py-5 pb-24 lg:pb-5 flex flex-col gap-4">
+      <main className="relative flex-1 lg:overflow-y-auto lg:min-h-0 px-4 lg:px-8 py-4 lg:py-5 pb-24 lg:pb-5 flex flex-col gap-4">
 
         {/* ── Header: greeting + mastery health bar ── */}
         <section
@@ -239,9 +239,9 @@ export default function DashboardPage() {
 
         {/* ── Recently done: the last few completed levels ── */}
         {recentSessions.length > 0 && (
-          <section className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(0,0,0,0.08)', backdropFilter: 'blur(12px)' }}>
-            <div className="text-xs font-bold mb-3" style={{ color: '#78716c' }}>✅ Recently done</div>
-            <ul className="flex flex-col gap-2">
+          <section className="rounded-2xl p-4 flex flex-col lg:min-h-0" style={{ background: 'rgba(255,255,255,0.55)', border: '1px solid rgba(0,0,0,0.08)', backdropFilter: 'blur(12px)' }}>
+            <div className="text-xs font-bold mb-3 flex-shrink-0" style={{ color: '#78716c' }}>✅ Recently done</div>
+            <ul className="flex flex-col gap-1.5 overflow-y-auto lg:max-h-[34vh] pr-1">
               {recentSessions.map((s, i) => {
                 const meta = subjectMeta(s.subjectKey.startsWith('english') ? 'english' : s.subjectKey);
                 return (
