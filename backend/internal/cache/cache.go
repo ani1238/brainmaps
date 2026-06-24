@@ -90,3 +90,24 @@ func Del(ctx context.Context, keys ...string) {
 	}
 	_ = client.Del(ctx, keys...).Err()
 }
+
+// BustStudent invalidates every per-student read-cache entry. Call this whenever
+// a student's progress changes (e.g. on session completion) so the dashboard,
+// today queues and brain-map markers reflect it immediately rather than after
+// the TTL. Best-effort and bounded so it never blocks the caller.
+func BustStudent(ctx context.Context, studentID string) {
+	if client == nil || studentID == "" {
+		return
+	}
+	bustCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+
+	keys := []string{"dash:" + studentID, "today:" + studentID}
+
+	// chapters:<sid>:<subject> — one per subject; SCAN and collect the matches.
+	iter := client.Scan(bustCtx, 0, "chapters:"+studentID+":*", 100).Iterator()
+	for iter.Next(bustCtx) {
+		keys = append(keys, iter.Val())
+	}
+	_ = client.Del(bustCtx, keys...).Err()
+}
