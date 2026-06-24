@@ -154,31 +154,128 @@ function ReportView({ report, onLock }: { report: ParentReport; onLock: () => vo
   const hours = Math.floor(report.effort.minutes / 60);
   const mins = report.effort.minutes % 60;
   const timeLabel = hours > 0 ? `${hours}h ${mins}m` : `${mins} min`;
+  const eyebrow = [report.weekNumber ? `Week ${report.weekNumber}` : '', report.focusSubject]
+    .filter(Boolean).join(' · ');
 
   return (
     <div className="w-full max-w-2xl mx-auto flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-[11px] font-bold tracking-widest" style={{ color: '#78716c' }}>PARENT REPORT</div>
-          <h1 className="text-2xl lg:text-3xl font-extrabold" style={{ color: '#1c1917' }}>{report.studentName}</h1>
+          <div className="text-[11px] font-bold tracking-widest" style={{ color: COLORS.strong }}>
+            {eyebrow || 'PARENT REPORT'}
+          </div>
+          <h1 className="text-2xl lg:text-3xl font-extrabold" style={{ color: '#1c1917' }}>A note about {report.studentName}</h1>
           <div className="text-xs mt-0.5" style={{ color: '#a8a29e' }}>{report.weekStart} → {report.weekEnd}</div>
         </div>
-        <button onClick={onLock} className="text-[11px] font-semibold flex items-center gap-1" style={{ color: '#4F46E5' }}>🔒 Lock</button>
+        <button onClick={onLock} className="text-[11px] font-semibold flex items-center gap-1 flex-shrink-0" style={{ color: '#4F46E5' }}>🔒 Lock</button>
       </div>
 
-      {/* AI narrative */}
+      {/* Hero headline / narrative */}
       <section className="rounded-2xl p-5" style={{ background: 'rgba(79,70,229,0.06)', border: '1px solid rgba(79,70,229,0.2)' }}>
-        <div className="text-xs font-bold mb-2" style={{ color: COLORS.indigo }}>This week ✨</div>
-        <p className="text-base leading-relaxed" style={{ color: '#1c1917' }}>{report.narrative}</p>
+        {report.headline && (
+          <p className="text-lg lg:text-xl font-extrabold leading-snug mb-2" style={{ color: '#1c1917' }}>{report.headline}</p>
+        )}
+        <p className="text-base leading-relaxed" style={{ color: '#44403c' }}>{report.narrative}</p>
       </section>
 
-      {/* Effort stats */}
+      {/* A real win */}
+      {report.win?.detail && (
+        <section className="rounded-2xl p-5 flex gap-3" style={{ background: 'rgba(225,245,238,0.7)', border: '1px solid rgba(29,158,117,0.3)' }}>
+          <div className="text-xl flex-none">🌱</div>
+          <div>
+            <div className="text-xs font-bold mb-1" style={{ color: COLORS.strong }}>A real win this week</div>
+            <div className="text-base font-bold mb-0.5" style={{ color: '#1c1917' }}>{report.win.concept}</div>
+            <p className="text-sm leading-relaxed" style={{ color: '#3f6b57' }}>{report.win.detail}</p>
+          </div>
+        </section>
+      )}
+
+      {/* One thing to look at */}
+      {report.gap?.explanation && (
+        <section className="rounded-2xl p-5" style={{ background: 'rgba(255,247,237,0.85)', border: '1px solid rgba(249,115,22,0.3)' }}>
+          <div className="text-xs font-bold mb-2" style={{ color: COLORS.weak }}>One thing to look at</div>
+          <div className="text-base font-bold mb-1" style={{ color: '#1c1917' }}>{report.gap.concept}</div>
+          <p className="text-sm leading-relaxed" style={{ color: '#5e5247' }}>{report.gap.explanation}</p>
+        </section>
+      )}
+
+      {/* In their own words */}
+      {report.voice?.answer && (
+        <section className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.75)', border: '1px solid rgba(0,0,0,0.08)' }}>
+          <div className="text-xs font-bold mb-2" style={{ color: '#78716c' }}>In {report.studentName.split(' ')[0]}&apos;s own words ✍️</div>
+          {report.voice.question && (
+            <p className="text-xs mb-2" style={{ color: '#a8a29e' }}>{report.voice.question}</p>
+          )}
+          <div
+            className="rounded-xl p-4 mb-3"
+            style={{
+              background: '#fcfcf8',
+              border: '1px solid #ece9df',
+              backgroundImage: 'repeating-linear-gradient(to bottom, transparent, transparent 27px, #eef0ec 27px, #eef0ec 28px)',
+            }}
+          >
+            <p className="text-base italic leading-7" style={{ color: '#3a5559' }}>&ldquo;{report.voice.answer}&rdquo;</p>
+          </div>
+          {report.voice.note && (
+            <div className="flex gap-2 rounded-lg p-3" style={{ background: 'rgba(224,153,46,0.1)' }}>
+              <span className="flex-none">✎</span>
+              <p className="text-sm leading-relaxed" style={{ color: '#7a5212' }}>{report.voice.note}</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* One question to ask tonight */}
+      {report.askTonight?.question && (
+        <section className="rounded-2xl overflow-hidden" style={{ background: 'rgba(251,241,221,0.9)', border: '1px solid rgba(224,153,46,0.35)' }}>
+          <div className="px-5 py-2 text-[11px] font-bold tracking-widest" style={{ background: '#e0992e', color: '#3d2705' }}>
+            🌙 ONE QUESTION TO ASK TONIGHT
+          </div>
+          <div className="p-5">
+            <p className="text-lg italic font-semibold leading-snug" style={{ color: '#5a3b0b' }}>&ldquo;{report.askTonight.question}&rdquo;</p>
+            {report.askTonight.hint && (
+              <p className="text-sm mt-2 leading-relaxed" style={{ color: '#8a6420' }}>{report.askTonight.hint}</p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* The bigger picture: recall vs apply */}
+      {report.trend && (
+        <section className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(0,0,0,0.08)' }}>
+          <div className="text-xs font-bold mb-3" style={{ color: COLORS.strong }}>The bigger picture 📈</div>
+          {[
+            { label: 'Remembering facts', pct: report.trend.recallPct, color: COLORS.strong },
+            { label: 'Applying to new situations', pct: report.trend.applyPct, color: COLORS.indigo },
+          ].map((row) => (
+            <div key={row.label} className="mb-2.5">
+              <div className="flex justify-between text-xs mb-1" style={{ color: '#78716c' }}>
+                <span>{row.label}</span><span className="font-bold">{row.pct}%</span>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,0.08)' }}>
+                <div className="h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, row.pct))}%`, background: row.color }} />
+              </div>
+            </div>
+          ))}
+          {report.trend.caption && (
+            <p className="text-sm leading-relaxed mt-2" style={{ color: '#5e5247' }}>{report.trend.caption}</p>
+          )}
+        </section>
+      )}
+
+      {/* What you can do (kept) */}
+      <section className="rounded-2xl p-5" style={{ background: 'rgba(79,70,229,0.06)', border: '1px solid rgba(79,70,229,0.2)' }}>
+        <div className="text-xs font-bold mb-2" style={{ color: COLORS.indigo }}>What you can do 💡</div>
+        <p className="text-base leading-relaxed font-semibold" style={{ color: '#1c1917' }}>{report.suggestion}</p>
+      </section>
+
+      {/* Effort footer */}
       <section className="grid grid-cols-3 gap-3">
         {[
-          { label: 'Sessions', value: report.effort.sessions, icon: '📝' },
-          { label: 'Active days', value: report.effort.activeDays, icon: '📅' },
-          { label: 'Streak', value: `${report.effort.streak} 🔥`, icon: '' },
+          { label: 'Sessions', value: report.effort.sessions },
+          { label: 'Active days', value: report.effort.activeDays },
+          { label: 'Streak', value: `${report.effort.streak} 🔥` },
         ].map((s) => (
           <div key={s.label} className="rounded-2xl p-4 text-center" style={{ background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(0,0,0,0.06)' }}>
             <div className="text-2xl font-extrabold" style={{ color: '#1c1917' }}>{s.value}</div>
@@ -186,42 +283,6 @@ function ReportView({ report, onLock }: { report: ParentReport; onLock: () => vo
           </div>
         ))}
         <div className="col-span-3 text-center text-xs" style={{ color: '#a8a29e' }}>≈ {timeLabel} of focused practice this week</div>
-      </section>
-
-      {/* Getting stronger */}
-      {report.improving.length > 0 && (
-        <section className="rounded-2xl p-5" style={{ background: 'rgba(225,245,238,0.7)', border: '1px solid rgba(29,158,117,0.25)' }}>
-          <div className="text-xs font-bold mb-3" style={{ color: COLORS.strong }}>Getting stronger 📈</div>
-          <div className="flex flex-wrap gap-2">
-            {report.improving.map((im) => (
-              <span key={im.name} className="px-3 py-1.5 rounded-full text-sm font-semibold" style={{ background: 'rgba(34,197,94,0.12)', color: '#16a34a' }}>{im.name}</span>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Focus areas */}
-      {report.focusAreas.length > 0 && (
-        <section className="rounded-2xl p-5" style={{ background: 'rgba(255,247,237,0.85)', border: '1px solid rgba(249,115,22,0.3)' }}>
-          <div className="text-xs font-bold mb-1" style={{ color: COLORS.weak }}>Focus areas 🎯</div>
-          <p className="text-xs mb-3" style={{ color: '#78716c' }}>Concepts your child is still working through. A little encouragement here goes a long way.</p>
-          <div className="flex flex-col gap-2.5">
-            {report.focusAreas.map((fa) => (
-              <div key={fa.concept} className="flex flex-col">
-                <span className="text-sm font-bold" style={{ color: '#1c1917' }}>{fa.concept}</span>
-                {fa.tags.length > 0 && (
-                  <span className="text-[11px]" style={{ color: '#a8a29e' }}>{fa.tags.slice(0, 4).join(' · ')}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Suggestion */}
-      <section className="rounded-2xl p-5" style={{ background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(0,0,0,0.08)' }}>
-        <div className="text-xs font-bold mb-2" style={{ color: '#78716c' }}>What you can do 💡</div>
-        <p className="text-base leading-relaxed font-semibold" style={{ color: '#1c1917' }}>{report.suggestion}</p>
       </section>
 
       {/* Send stub */}

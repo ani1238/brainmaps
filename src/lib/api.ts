@@ -207,8 +207,16 @@ export interface ParentReport {
   studentName: string;
   weekStart: string;
   weekEnd: string;
+  weekNumber?: number;
+  focusSubject?: string;
+  headline?: string;
   narrative: string;
   suggestion: string;
+  win?: { concept: string; allLevels?: boolean; detail: string };
+  gap?: { concept: string; explanation: string };
+  voice?: { question: string; answer: string; note: string };
+  askTonight?: { question: string; hint: string };
+  trend?: { recallPct: number; applyPct: number; caption: string };
   effort: { sessions: number; activeDays: number; streak: number; minutes: number };
   mastery: { strong: number; developing: number; weak: number; total: number };
   improving: { name: string; delta: number }[];
