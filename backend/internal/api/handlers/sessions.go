@@ -31,7 +31,7 @@ func StartSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var sessionID string
-	err = db.Pool.QueryRow(r.Context(), `
+	err = db.QueryRow(r.Context(), `
 		INSERT INTO sessions (student_id, concept_id, station, access_token_hash)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
@@ -67,7 +67,7 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 
 	// Verify session exists
 	var studentID, conceptID string
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.QueryRow(r.Context(), `
 		SELECT student_id, concept_id
 		FROM sessions
 		WHERE id = $1 AND access_token_hash = $2 AND completed_at IS NULL
@@ -87,12 +87,12 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			var correct bool
-			db.Pool.QueryRow(r.Context(), `
+			db.QueryRow(r.Context(), `
 				SELECT is_correct FROM mcq_options
 				WHERE question_id = $1 AND option_key = $2
 			`, ans.QuestionID, *ans.ChosenOption).Scan(&correct)
 
-			db.Pool.Exec(r.Context(), `
+			db.Exec(r.Context(), `
 				INSERT INTO session_answers
 				  (session_id, question_id, question_type, chosen_option, is_correct)
 				VALUES ($1, $2, $3, $4, $5)
@@ -110,7 +110,7 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 			if ans.StudentText == nil || *ans.StudentText == "" {
 				continue
 			}
-			db.Pool.Exec(r.Context(), `
+			db.Exec(r.Context(), `
 				INSERT INTO session_answers
 				  (session_id, question_id, question_type, student_text)
 				VALUES ($1, $2, $3, $4)
@@ -124,7 +124,7 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 	// how each answer type is inserted above.
 	for _, ans := range req.Answers {
 		if ans.ElapsedMs != nil {
-			db.Pool.Exec(r.Context(), `
+			db.Exec(r.Context(), `
 				UPDATE session_answers SET elapsed_ms = $1
 				WHERE session_id = $2 AND question_id = $3
 			`, *ans.ElapsedMs, sessionID, ans.QuestionID)
@@ -136,7 +136,7 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 	if mcqTotal > 0 {
 		mcqScore = float64(mcqCorrect) / float64(mcqTotal)
 	}
-	db.Pool.Exec(r.Context(), `
+	db.Exec(r.Context(), `
 		UPDATE sessions
 		SET completed_at = $1, mcq_correct = $2, mcq_total = $3, score = $4
 		WHERE id = $5
@@ -146,18 +146,18 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 	if hasOpenAnswers {
 		// Async: grade open answers, then recompute EMA. The client polls
 		// GetSession for the authoritative score and passed flag.
-		go grade.GradeOpenAnswers(sessionID)
+		go grade.GradeOpenAnswers(sessionID, studentID)
 	} else {
 		// Pure MCQ session: recompute synchronously (fast, no AI call) so the
 		// response reflects the station outcome — a retry that misses its
 		// targeted weak tags must not show as passed even on a high score.
-		grade.RecomputeSession(sessionID)
+		grade.RecomputeSession(sessionID, studentID)
 		passed = passed && stationCleared(r.Context(), sessionID)
 	}
 
 	// Fetch updated state for the response (may still be "MCQ-only" until AI finishes)
 	var state models.MasteryState = models.NotStarted
-	db.Pool.QueryRow(r.Context(), `
+	db.QueryRow(r.Context(), `
 		SELECT state FROM concept_progress WHERE student_id = $1 AND concept_id = $2
 	`, studentID, conceptID).Scan(&state)
 

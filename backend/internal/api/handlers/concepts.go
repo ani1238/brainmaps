@@ -38,7 +38,7 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := db.Pool.Query(r.Context(), `
+	rows, err := db.Query(r.Context(), `
 		SELECT c.id, c.subject_key, c.chapter_id, c.name, c.order_idx,
 		       cp.ema_score, cp.state,
 		       cp.l1_state, cp.l2_state, cp.l3_state,
@@ -157,7 +157,7 @@ func GetConcept(w http.ResponseWriter, r *http.Request) {
 		lastDone                  *time.Time
 	)
 
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.QueryRow(r.Context(), `
 		SELECT c.id, c.subject_key, c.chapter_id, c.name,
 		       ch.name, ch.number,
 		       c.metadata->>'recap_summary' AS recap,
@@ -239,7 +239,7 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := db.Pool.Query(r.Context(), `
+	rows, err := db.Query(r.Context(), `
 		SELECT q.id, q.type, q.level, q.text, q.explanation, q.rubric_hint,
 		       COALESCE(q.rubric_points, '{}'::text[]),
 		       COALESCE(q.key_points, '{}'::text[]),
@@ -278,7 +278,7 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 	if student := r.URL.Query().Get("student"); student != "" {
 		if col := levelStateCol(level); col != "" {
 			var state string
-			err := db.Pool.QueryRow(r.Context(), fmt.Sprintf(
+			err := db.QueryRow(r.Context(), fmt.Sprintf(
 				`SELECT %s FROM concept_progress WHERE student_id = $1 AND concept_id = $2`, col,
 			), student, conceptID).Scan(&state)
 			if err == nil && state == "needs_fixing" {
@@ -396,7 +396,7 @@ func scanQuestionRows(rows pgx.Rows, conceptID string) ([]models.Question, error
 // Keep the ordering in sync with activeWeakTags in the grade package, which
 // uses the same ranking for the tag-gated pass decision.
 func activeTagsRanked(ctx context.Context, studentID, conceptID string) []string {
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT tag FROM student_weak_concepts
 		WHERE student_id = $1 AND concept_id = $2 AND status = 'active'
 		ORDER BY wrong_count DESC, last_seen_at DESC
@@ -419,7 +419,7 @@ func activeTagsRanked(ctx context.Context, studentID, conceptID string) []string
 // recentlyClearedTags returns up to two weak tags the student cleared in the
 // last 30 days — revise sessions silently re-test them (spaced recheck).
 func recentlyClearedTags(ctx context.Context, studentID, conceptID string) []string {
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT tag FROM student_weak_concepts
 		WHERE student_id = $1 AND concept_id = $2 AND status = 'cleared'
 		  AND cleared_at > now() - interval '30 days'
@@ -445,7 +445,7 @@ func recentlyClearedTags(ctx context.Context, studentID, conceptID string) []str
 // key_concepts match any cleared tag — cleared weaknesses usually live on
 // lower-level questions than the revise set itself.
 func recheckCandidates(ctx context.Context, conceptID string, tags []string) []models.Question {
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT q.id, q.type, q.level, q.text, q.explanation, q.rubric_hint,
 		       COALESCE(q.rubric_points, '{}'::text[]),
 		       COALESCE(q.key_points, '{}'::text[]),
@@ -471,7 +471,7 @@ func recheckCandidates(ctx context.Context, conceptID string, tags []string) []m
 }
 
 func latestAttemptQuestionIDs(r *http.Request, studentID, conceptID, level string) map[string]bool {
-	rows, err := db.Pool.Query(r.Context(), `
+	rows, err := db.Query(r.Context(), `
 		SELECT sa.question_id
 		FROM session_answers sa
 		WHERE sa.session_id = (

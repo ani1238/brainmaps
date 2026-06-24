@@ -18,7 +18,7 @@ func studentFromReq(r *http.Request) (string, bool) {
 func studentGradeBoard(r *http.Request, studentID string) (int, string) {
 	var grade int
 	var board string
-	db.Pool.QueryRow(r.Context(), `SELECT grade, board FROM students WHERE id = $1`, studentID).Scan(&grade, &board)
+	db.QueryRow(r.Context(), `SELECT grade, board FROM students WHERE id = $1`, studentID).Scan(&grade, &board)
 	return grade, board
 }
 

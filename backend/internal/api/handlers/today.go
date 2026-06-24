@@ -38,7 +38,7 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 
 	// Fix queue: every concept with a station that still needs fixing. A failed
 	// level should appear immediately and remain here until the student passes it.
-	fixRows, err := db.Pool.Query(r.Context(), `
+	fixRows, err := db.Query(r.Context(), `
 		SELECT c.id, c.subject_key, c.chapter_id, c.name, c.order_idx,
 		       cp.ema_score, cp.state,
 		       cp.l1_state, cp.l2_state, cp.l3_state,
@@ -66,7 +66,7 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 	fixQueue := scanProgressRows(fixRows, studentID, false)
 
 	// Revise queue: concepts due for spaced repetition today
-	revRows, err := db.Pool.Query(r.Context(), `
+	revRows, err := db.Query(r.Context(), `
 		SELECT c.id, c.subject_key, c.chapter_id, c.name, c.order_idx,
 		       cp.ema_score, cp.state,
 		       cp.l1_state, cp.l2_state, cp.l3_state,
@@ -92,7 +92,7 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 
 	reviseQueue := scanProgressRows(revRows, studentID, true)
 
-	upcomingRows, err := db.Pool.Query(r.Context(), `
+	upcomingRows, err := db.Query(r.Context(), `
 		SELECT c.id, c.subject_key, c.chapter_id, c.name, c.order_idx,
 		       cp.ema_score, cp.state,
 		       cp.l1_state, cp.l2_state, cp.l3_state,
@@ -121,7 +121,7 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 	// Recently done: the last few completed levels/stations, newest first. Powers
 	// the "Recently done" feed on the Today view so a kid can see what they just
 	// finished. passed mirrors CompleteSession's immediate threshold (score ≥ 0.60).
-	recentRows, err := db.Pool.Query(r.Context(), `
+	recentRows, err := db.Query(r.Context(), `
 		SELECT s.concept_id, c.name, c.subject_key, s.station, s.score, s.completed_at
 		FROM sessions s
 		JOIN concepts c ON c.id = s.concept_id

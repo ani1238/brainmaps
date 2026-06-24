@@ -61,40 +61,46 @@ methods limited to GET/POST/OPTIONS. In production the browser calls the API
 **same-origin** through the Next.js rewrite (`/api/v1/* → fly`), so no
 cross-origin requests occur. `ALLOWED_ORIGINS` is intentionally unset in prod.
 
-## 6. Row-Level Security — status & rollout plan
+## 6. Row-Level Security — ENABLED
 
-**Status: staged, NOT enabled** (migration `019_rls.sql` is written but not
-applied). Tenant isolation is already enforced in the app (§3); RLS would add a
-DB-level backstop.
+RLS is **live** on the per-student data tables (`concept_progress`,
+`revise_schedule`, `sessions`, `session_answers`, `student_weak_concepts`,
+`parent_reports`, `study_plans`, `plan_items`, `plan_leaves`) — migration
+`019_rls.sql`, `FORCE ROW LEVEL SECURITY`, policies keyed on a per-request GUC
+`app.student_id` (USING + WITH CHECK).
 
-**Why not flipped on today:** RLS only protects data if the app sets a
-per-request identity on the connection (`SET LOCAL app.user_id` inside a
-transaction) and connects as a role subject to RLS. The backend currently runs
-queries directly on a shared pgx pool (no per-request transaction), and the
-async grader runs on a background context. Turning on `FORCE ROW LEVEL
-SECURITY` before that plumbing exists would deny every query and take the app
-down — unacceptable while real users are testing.
+How the identity is set:
+- **Request path** — `middleware.RLSContext` opens a per-request transaction and
+  runs `SET LOCAL app.student_id = <JWT student id>`; all protected handlers run
+  their queries on that transaction (via the `db.Q(ctx)` querier). Commits on
+  success, rolls back on panic/5xx.
+- **Background** — the async grader and MCQ recompute wrap their DB phases in
+  `db.RunAsStudent(ctx, studentID, …)` (a short transaction with the GUC set;
+  slow AI calls are kept outside it so a pool connection isn't held).
 
-**Rollout plan (safe, tested, separate change):**
-1. Add request-scoped transaction middleware on the authenticated group that
-   runs `SET LOCAL app.user_id = '<jwt user>'`; expose a `db.Q(ctx)` querier
-   and switch protected handlers from `db.Pool` to it.
-2. Make the async grader open its own transaction and set `app.user_id` for the
-   session's owner.
-3. Apply `019_rls.sql`.
-4. Verify (positive: a user sees only their rows; negative: cross-user reads
-   return 0 rows) on staging, with `DISABLE ROW LEVEL SECURITY` as instant
-   rollback.
+**Dedicated role (the key piece):** the default Neon role `neondb_owner` has
+`BYPASSRLS`, so policies never apply to it. The app therefore connects as a
+separate **`brainmaps_app`** role — `NOSUPERUSER NOBYPASSRLS`, granted only
+DML + sequence usage. Migrations and admin still use the owner. With this role
+the policies are enforced: verified that with `app.student_id = A`, a query for
+B's rows returns **0**, inserting B's row is **rejected** by `WITH CHECK`, and
+with **no** GUC every protected table returns **0** (fail-closed).
+
+**Rollback:** set the `DATABASE_URL` Fly secret back to the owner role (instant —
+owner bypasses RLS), or `ALTER TABLE <t> DISABLE ROW LEVEL SECURITY;` per table.
 
 ## 7. Backlog / recommendations
 
-- Execute the RLS rollout above.
 - Distributed (per-account) login throttling — current limiter is per-instance
   and per-IP; add per-email backoff for credential-stuffing resistance.
-- Rotate `JWT_SECRET` / DB creds if they were ever shared; confirm
-  `JWT_SECRET` is high-entropy.
+- Extend RLS to `users`/`students`/`auth_sessions` (needs a bypass path for the
+  pre-auth register/login/reset flows).
+- Rotate `JWT_SECRET` / DB creds if ever shared; confirm `JWT_SECRET` entropy.
 - Lightweight audit logging for sensitive actions (PIN changes, report access).
 
 ## Changelog
 - 2026-06-25 — Audit + hardening: roles (018), error sanitization, security
   headers, auth rate limiting; RLS staged (019) with rollout plan.
+- 2026-06-25 — RLS **enabled**: dedicated non-bypass `brainmaps_app` role,
+  per-request `app.student_id` (RLSContext) + `db.RunAsStudent` for background
+  jobs; all protected handlers routed through a context querier.

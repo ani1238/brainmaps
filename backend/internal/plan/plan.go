@@ -42,7 +42,7 @@ func GetSettings(ctx context.Context, studentID string) (Settings, bool, error) 
 		start time.Time
 		days  []int32
 	)
-	err := db.Pool.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		SELECT start_date, timezone, study_days,
 		       new_concepts_per_day, revise_cap_per_day, fix_cap_per_day, subjects_per_week
 		FROM study_plans WHERE student_id = $1
@@ -61,7 +61,7 @@ func GetSettings(ctx context.Context, studentID string) (Settings, bool, error) 
 // SaveSettings upserts the student's plan settings.
 func SaveSettings(ctx context.Context, studentID string, s Settings) error {
 	s = sanitize(s)
-	_, err := db.Pool.Exec(ctx, `
+	_, err := db.Exec(ctx, `
 		INSERT INTO study_plans
 		  (student_id, start_date, timezone, study_days,
 		   new_concepts_per_day, revise_cap_per_day, fix_cap_per_day, subjects_per_week, updated_at)
@@ -92,7 +92,7 @@ func Generate(ctx context.Context, studentID string, grade int, board string, s 
 		return err
 	}
 
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT c.id, c.subject_key
 		FROM concepts c
 		JOIN subjects sub ON sub.key = c.subject_key
@@ -148,7 +148,7 @@ func Generate(ctx context.Context, studentID string, grade int, board string, s 
 	studyDays := daySet(s.StudyDays)
 	leaves := loadLeaves(ctx, studentID)
 
-	tx, err := db.Pool.Begin(ctx)
+	tx, err := db.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -186,7 +186,7 @@ func Generate(ctx context.Context, studentID string, grade int, board string, s 
 // HasPlan reports whether the student has any plan items yet.
 func HasPlan(ctx context.Context, studentID string) bool {
 	var exists bool
-	db.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM plan_items WHERE student_id = $1)`, studentID).Scan(&exists)
+	db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM plan_items WHERE student_id = $1)`, studentID).Scan(&exists)
 	return exists
 }
 
@@ -235,7 +235,7 @@ func Agenda(ctx context.Context, studentID string, s Settings, date time.Time) (
 	out := AgendaResp{Date: d, Learn: []LearnItem{}, Fix: []FixItem{}, Revise: []ReviseItem{}}
 
 	// Learn: today's (and any carried-over) planned concepts, capped.
-	lrows, err := db.Pool.Query(ctx, `
+	lrows, err := db.Query(ctx, `
 		SELECT pi.ref_id, c.name, pi.subject_key, pi.planned_date,
 		       (pi.planned_date < $2) AS overdue
 		FROM plan_items pi
@@ -264,7 +264,7 @@ func Agenda(ctx context.Context, studentID string, s Settings, date time.Time) (
 	lrows.Close()
 
 	// Fix: concepts with a station that needs fixing, capped.
-	frows, err := db.Pool.Query(ctx, `
+	frows, err := db.Query(ctx, `
 		SELECT c.id, c.name, c.subject_key,
 		       CASE
 		         WHEN cp.l1_state = 'needs_fixing'         THEN 'level1'
@@ -297,7 +297,7 @@ func Agenda(ctx context.Context, studentID string, s Settings, date time.Time) (
 	frows.Close()
 
 	// Revise: concepts due on/before the date, capped, weakest first.
-	rrows, err := db.Pool.Query(ctx, `
+	rrows, err := db.Query(ctx, `
 		SELECT c.id, c.name, c.subject_key, rs.next_due_at
 		FROM revise_schedule rs
 		JOIN concepts c ON c.id = rs.concept_id
@@ -363,7 +363,7 @@ type PlanItemDTO struct {
 // Items returns the student's plan items between two dates (inclusive) for the
 // calendar view.
 func Items(ctx context.Context, studentID, from, to string) ([]PlanItemDTO, error) {
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT pi.id, pi.ref_id, c.name, pi.subject_key, pi.planned_date, pi.order_idx, pi.status, pi.source
 		FROM plan_items pi
 		JOIN concepts c ON c.id = pi.ref_id
@@ -396,7 +396,7 @@ func MoveItem(ctx context.Context, studentID string, id int64, newDate string) e
 		open := firstOpenDay(t, daySet(s.StudyDays), loadLeaves(ctx, studentID))
 		newDate = open.Format("2006-01-02")
 	}
-	_, err := db.Pool.Exec(ctx, `
+	_, err := db.Exec(ctx, `
 		UPDATE plan_items SET planned_date = $3, source = 'manual', updated_at = now()
 		WHERE id = $1 AND student_id = $2
 	`, id, studentID, newDate)
@@ -421,7 +421,7 @@ type CalEntry struct {
 func Calendar(ctx context.Context, studentID, from, to string) ([]CalEntry, error) {
 	out := []CalEntry{}
 
-	lrows, err := db.Pool.Query(ctx, `
+	lrows, err := db.Query(ctx, `
 		SELECT pi.id, pi.ref_id, c.name, pi.subject_key, pi.planned_date, pi.status
 		FROM plan_items pi
 		JOIN concepts c ON c.id = pi.ref_id
@@ -445,7 +445,7 @@ func Calendar(ctx context.Context, studentID, from, to string) ([]CalEntry, erro
 	}
 	lrows.Close()
 
-	rrows, err := db.Pool.Query(ctx, `
+	rrows, err := db.Query(ctx, `
 		SELECT rs.concept_id, c.name, c.subject_key, rs.next_due_at
 		FROM revise_schedule rs
 		JOIN concepts c ON c.id = rs.concept_id
@@ -475,7 +475,7 @@ func Calendar(ctx context.Context, studentID, from, to string) ([]CalEntry, erro
 
 // SkipItem marks a plan item skipped.
 func SkipItem(ctx context.Context, studentID string, id int64) error {
-	_, err := db.Pool.Exec(ctx, `
+	_, err := db.Exec(ctx, `
 		UPDATE plan_items SET status = 'skipped', updated_at = now()
 		WHERE id = $1 AND student_id = $2
 	`, id, studentID)
@@ -493,7 +493,7 @@ type Leave struct {
 
 // Leaves lists the student's leave ranges.
 func Leaves(ctx context.Context, studentID string) ([]Leave, error) {
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT id, start_date, end_date, COALESCE(reason,'')
 		FROM plan_leaves WHERE student_id = $1 ORDER BY start_date DESC
 	`, studentID)
@@ -528,7 +528,7 @@ func AddLeave(ctx context.Context, studentID string, start, end time.Time, reaso
 		days = 1
 	}
 
-	if _, err := db.Pool.Exec(ctx, `
+	if _, err := db.Exec(ctx, `
 		INSERT INTO plan_leaves (student_id, start_date, end_date, reason)
 		VALUES ($1, $2, $3, $4)
 	`, studentID, start.Format("2006-01-02"), end.Format("2006-01-02"), reason); err != nil {
@@ -536,7 +536,7 @@ func AddLeave(ctx context.Context, studentID string, start, end time.Time, reaso
 	}
 
 	// Slide planned (not-done) learning that starts on/after the leave forward.
-	if _, err := db.Pool.Exec(ctx, `
+	if _, err := db.Exec(ctx, `
 		UPDATE plan_items
 		SET planned_date = planned_date + ($3 * interval '1 day'), updated_at = now()
 		WHERE student_id = $1 AND status IN ('planned','started') AND planned_date >= $2
@@ -545,7 +545,7 @@ func AddLeave(ctx context.Context, studentID string, start, end time.Time, reaso
 	}
 
 	// Freeze revises whose due date falls inside the break.
-	if _, err := db.Pool.Exec(ctx, `
+	if _, err := db.Exec(ctx, `
 		UPDATE revise_schedule
 		SET next_due_at = next_due_at + ($4 * interval '1 day')
 		WHERE student_id = $1 AND next_due_at::date BETWEEN $2 AND $3
@@ -558,7 +558,7 @@ func AddLeave(ctx context.Context, studentID string, start, end time.Time, reaso
 
 // RemoveLeave deletes a leave range.
 func RemoveLeave(ctx context.Context, studentID string, id int64) error {
-	_, err := db.Pool.Exec(ctx, `DELETE FROM plan_leaves WHERE id = $1 AND student_id = $2`, id, studentID)
+	_, err := db.Exec(ctx, `DELETE FROM plan_leaves WHERE id = $1 AND student_id = $2`, id, studentID)
 	return err
 }
 
@@ -567,7 +567,7 @@ func RemoveLeave(ctx context.Context, studentID string, id int64) error {
 // dumping a wall of overdue items on the student.
 func Reflow(ctx context.Context, studentID string, s Settings) error {
 	s = sanitize(s)
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT rs.concept_id
 		FROM revise_schedule rs
 		JOIN concept_progress cp ON cp.concept_id = rs.concept_id AND cp.student_id = rs.student_id
@@ -602,7 +602,7 @@ func Reflow(ctx context.Context, studentID string, s Settings) error {
 	for i, id := range ids {
 		offset := i / dailyCap // 0 for the first cap, 1 for the next, …
 		due := addStudyDays(today, offset, studyDays)
-		if _, err := db.Pool.Exec(ctx, `
+		if _, err := db.Exec(ctx, `
 			UPDATE revise_schedule SET next_due_at = $3::date + time '12:00'
 			WHERE student_id = $1 AND concept_id = $2
 		`, studentID, id, due.Format("2006-01-02")); err != nil {
@@ -614,7 +614,7 @@ func Reflow(ctx context.Context, studentID string, s Settings) error {
 
 func isOnLeave(ctx context.Context, studentID string, date time.Time) bool {
 	var on bool
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT EXISTS(SELECT 1 FROM plan_leaves WHERE student_id = $1 AND $2 BETWEEN start_date AND end_date)
 	`, studentID, date.Format("2006-01-02")).Scan(&on)
 	return on
@@ -704,7 +704,7 @@ type leaveRange struct{ start, end string } // YYYY-MM-DD inclusive
 
 func loadLeaves(ctx context.Context, studentID string) []leaveRange {
 	out := []leaveRange{}
-	rows, err := db.Pool.Query(ctx, `SELECT start_date, end_date FROM plan_leaves WHERE student_id = $1`, studentID)
+	rows, err := db.Query(ctx, `SELECT start_date, end_date FROM plan_leaves WHERE student_id = $1`, studentID)
 	if err != nil {
 		return out
 	}

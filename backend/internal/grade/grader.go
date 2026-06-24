@@ -26,30 +26,9 @@ type GradeResult struct {
 // SPOT_IT, FIX_IT, PRODUCE_IT, CONTEXT_CLUE, GENERATIVE_PRODUCTION, …) via
 // an available AI provider, then recomputes the session score and updates
 // concept_progress.
-func GradeOpenAnswers(sessionID string) {
+func GradeOpenAnswers(sessionID, studentID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-
-	// 1. Load all open-ended answers for this session.
-	rows, err := db.Pool.Query(ctx, `
-		SELECT sa.id, sa.question_id, sa.question_type, sa.student_text,
-		       q.text, q.key_concepts,
-		       COALESCE(array_to_string(q.rubric_points, '; '), q.rubric_hint),
-		       c.name AS concept_name, c.subject_key, ch.name AS chapter_name
-		FROM session_answers sa
-		JOIN questions q ON q.id = sa.question_id
-		JOIN sessions  s ON s.id = sa.session_id
-		JOIN concepts  c ON c.id = s.concept_id
-		JOIN chapters  ch ON ch.id = c.chapter_id
-		WHERE sa.session_id = $1
-		  AND sa.question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
-		  AND sa.student_text IS NOT NULL
-		  AND sa.ai_graded_at IS NULL
-	`, sessionID)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
 
 	type answerRow struct {
 		AnswerID    string
@@ -64,28 +43,56 @@ func GradeOpenAnswers(sessionID string) {
 		ChapterName string
 	}
 
+	// 1. Load all open-ended answers for this session (short RLS transaction).
 	var answers []answerRow
-	for rows.Next() {
-		var a answerRow
-		if err := rows.Scan(
-			&a.AnswerID, &a.QuestionID, &a.QType, &a.StudentText,
-			&a.QText, &a.KeyConcepts, &a.RubricHint,
-			&a.ConceptName, &a.SubjectKey, &a.ChapterName,
-		); err != nil {
-			continue
+	loadErr := db.RunAsStudent(ctx, studentID, func(ctx context.Context) error {
+		rows, err := db.Query(ctx, `
+			SELECT sa.id, sa.question_id, sa.question_type, sa.student_text,
+			       q.text, q.key_concepts,
+			       COALESCE(array_to_string(q.rubric_points, '; '), q.rubric_hint),
+			       c.name AS concept_name, c.subject_key, ch.name AS chapter_name
+			FROM session_answers sa
+			JOIN questions q ON q.id = sa.question_id
+			JOIN sessions  s ON s.id = sa.session_id
+			JOIN concepts  c ON c.id = s.concept_id
+			JOIN chapters  ch ON ch.id = c.chapter_id
+			WHERE sa.session_id = $1
+			  AND sa.question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
+			  AND sa.student_text IS NOT NULL
+			  AND sa.ai_graded_at IS NULL
+		`, sessionID)
+		if err != nil {
+			return err
 		}
-		answers = append(answers, a)
-	}
-	rows.Close()
-
-	if len(answers) == 0 {
-		recomputeSession(ctx, sessionID, nil)
+		defer rows.Close()
+		for rows.Next() {
+			var a answerRow
+			if err := rows.Scan(
+				&a.AnswerID, &a.QuestionID, &a.QType, &a.StudentText,
+				&a.QText, &a.KeyConcepts, &a.RubricHint,
+				&a.ConceptName, &a.SubjectKey, &a.ChapterName,
+			); err != nil {
+				continue
+			}
+			answers = append(answers, a)
+		}
+		return nil
+	})
+	if loadErr != nil {
 		return
 	}
 
-	// 2. Grade EVERY answer in a SINGLE model call. A session is always one
-	//    concept + one station, so all answers share the same curriculum
-	//    context — we send them together instead of one call per answer.
+	if len(answers) == 0 {
+		db.RunAsStudent(ctx, studentID, func(ctx context.Context) error {
+			recomputeSession(ctx, sessionID, nil)
+			return nil
+		})
+		return
+	}
+
+	// 2. Grade EVERY answer in a SINGLE model call (no DB held during the call).
+	//    A session is always one concept + one station, so all answers share the
+	//    same curriculum context — we send them together.
 	shared := answers[0]
 	items := make([]gradeItem, len(answers))
 	for i, a := range answers {
@@ -108,27 +115,27 @@ func GradeOpenAnswers(sessionID string) {
 		}
 	}
 
-	// 3. Persist each grade. ai_graded_at is stamped only after the recompute
-	//    below, so a GetSession poll never reports "grading done" before the
-	//    station outcome (and the Passed flag derived from it) is final.
-	for i, a := range answers {
-		db.Pool.Exec(ctx, `
-			UPDATE session_answers
-			SET ai_score = $1, ai_feedback = $2
-			WHERE id = $3
-		`, results[i].Score, results[i].Feedback, a.AnswerID)
-	}
-
-	// 4. Recompute session score + advance the per-tag weakness lifecycle (AI's
-	//    weak concepts unioned with the key_concepts of every wrong answer).
-	recomputeSession(ctx, sessionID, weakConcepts)
-
-	db.Pool.Exec(ctx, `
-		UPDATE session_answers SET ai_graded_at = now()
-		WHERE session_id = $1
-		  AND question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
-		  AND student_text IS NOT NULL
-	`, sessionID)
+	// 3. Persist grades, recompute, and stamp ai_graded_at in one RLS transaction.
+	db.RunAsStudent(ctx, studentID, func(ctx context.Context) error {
+		for i, a := range answers {
+			db.Exec(ctx, `
+				UPDATE session_answers
+				SET ai_score = $1, ai_feedback = $2
+				WHERE id = $3
+			`, results[i].Score, results[i].Feedback, a.AnswerID)
+		}
+		// Recompute session score + advance the per-tag weakness lifecycle.
+		recomputeSession(ctx, sessionID, weakConcepts)
+		// ai_graded_at is stamped only after the recompute, so a GetSession poll
+		// never reports "grading done" before the station outcome is final.
+		db.Exec(ctx, `
+			UPDATE session_answers SET ai_graded_at = now()
+			WHERE session_id = $1
+			  AND question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
+			  AND student_text IS NOT NULL
+		`, sessionID)
+		return nil
+	})
 }
 
 // gradeItem is one answer to grade inside a batch call.
@@ -318,18 +325,22 @@ func scoringRubric(qType string) string {
 	}
 }
 
-// RecomputeSession is exported so the sessions handler can call it for MCQ-only sessions.
-func RecomputeSession(sessionID string) {
+// RecomputeSession is exported so the sessions handler can call it for MCQ-only
+// sessions. studentID scopes the row-level-security identity for the recompute.
+func RecomputeSession(sessionID, studentID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	recomputeSession(ctx, sessionID, nil) // MCQ-only: weakness derived from wrong answers' tags
+	db.RunAsStudent(ctx, studentID, func(ctx context.Context) error {
+		recomputeSession(ctx, sessionID, nil) // MCQ-only: weakness from wrong answers' tags
+		return nil
+	})
 }
 
 // recomputeSession averages MCQ + AI scores and updates concept_progress.
 func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 	var studentID, conceptID, station string
 	var mcqCorrect, mcqTotal int
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT student_id, concept_id, station, mcq_correct, mcq_total
 		FROM sessions WHERE id = $1
 	`, sessionID).Scan(&studentID, &conceptID, &station, &mcqCorrect, &mcqTotal)
@@ -345,7 +356,7 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 	}
 
 	// AI score contribution
-	aiRows, _ := db.Pool.Query(ctx, `
+	aiRows, _ := db.Query(ctx, `
 		SELECT ai_score FROM session_answers
 		WHERE session_id = $1 AND ai_score IS NOT NULL
 	`, sessionID)
@@ -364,10 +375,10 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 	}
 
 	// Update session with final score
-	db.Pool.Exec(ctx, `UPDATE sessions SET score = $1 WHERE id = $2`, sessionScore, sessionID)
+	db.Exec(ctx, `UPDATE sessions SET score = $1 WHERE id = $2`, sessionScore, sessionID)
 
 	// Fetch last 5 session scores for EMA
-	scoreRows, _ := db.Pool.Query(ctx, `
+	scoreRows, _ := db.Query(ctx, `
 		SELECT score FROM sessions
 		WHERE student_id = $1 AND concept_id = $2 AND score IS NOT NULL
 		ORDER BY completed_at DESC LIMIT 5
@@ -385,7 +396,7 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 	ema := computeEMA(scores)
 	state := scoreToState(ema)
 
-	db.Pool.Exec(ctx, `
+	db.Exec(ctx, `
 		INSERT INTO concept_progress (student_id, concept_id, ema_score, state, total_attempts, last_session_at)
 		VALUES ($1, $2, $3, $4, 1, now())
 		ON CONFLICT (student_id, concept_id) DO UPDATE
@@ -415,20 +426,20 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 			nextSt := nextStationKey(models.StationKey(station))
 			nextCol := stationStateCol(nextSt)
 			if nextCol != "" {
-				db.Pool.Exec(ctx, fmt.Sprintf(
+				db.Exec(ctx, fmt.Sprintf(
 					`UPDATE concept_progress SET %s = 'done', %s = 'current'
 					 WHERE student_id = $1 AND concept_id = $2`, curCol, nextCol,
 				), studentID, conceptID)
 			} else {
 				// Last station (revise) — just mark done
-				db.Pool.Exec(ctx, fmt.Sprintf(
+				db.Exec(ctx, fmt.Sprintf(
 					`UPDATE concept_progress SET %s = 'done'
 					 WHERE student_id = $1 AND concept_id = $2`, curCol,
 				), studentID, conceptID)
 			}
 		} else {
 			// Failed: mark needs_fixing so Today's Fix can surface it
-			db.Pool.Exec(ctx, fmt.Sprintf(
+			db.Exec(ctx, fmt.Sprintf(
 				`UPDATE concept_progress SET %s = 'needs_fixing'
 				 WHERE student_id = $1 AND concept_id = $2`, curCol,
 			), studentID, conceptID)
@@ -464,7 +475,7 @@ func nextRecallInterval(current int, passed bool) int {
 
 func updateReviseSchedule(ctx context.Context, studentID, conceptID string, passed bool) {
 	var current int
-	if err := db.Pool.QueryRow(ctx, `
+	if err := db.QueryRow(ctx, `
 		SELECT interval_days
 		FROM revise_schedule
 		WHERE student_id = $1 AND concept_id = $2
@@ -472,7 +483,7 @@ func updateReviseSchedule(ctx context.Context, studentID, conceptID string, pass
 		current = 0
 	}
 	next := nextRecallInterval(current, passed)
-	db.Pool.Exec(ctx, `
+	db.Exec(ctx, `
 		INSERT INTO revise_schedule
 		  (student_id, concept_id, interval_days, next_due_at, last_done_at)
 		VALUES ($1, $2, $3, now() + ($3 * interval '1 day'), now())
@@ -488,7 +499,7 @@ func updateReviseSchedule(ctx context.Context, studentID, conceptID string, pass
 // the next day.
 func unlockReviseIfEligible(ctx context.Context, studentID, conceptID string) {
 	var unlocked bool
-	err := db.Pool.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		UPDATE concept_progress
 		SET revise_unlocked = true,
 		    revise_state = CASE WHEN revise_state = 'locked' THEN 'current' ELSE revise_state END
@@ -504,7 +515,7 @@ func unlockReviseIfEligible(ctx context.Context, studentID, conceptID string) {
 		return
 	}
 
-	db.Pool.Exec(ctx, `
+	db.Exec(ctx, `
 		INSERT INTO revise_schedule
 		  (student_id, concept_id, interval_days, next_due_at)
 		VALUES ($1, $2, 1, now() + interval '1 day')
@@ -523,7 +534,7 @@ func unlockReviseIfEligible(ctx context.Context, studentID, conceptID string) {
 func updateStreak(ctx context.Context, studentID string) {
 	// Treat a multi-day gap as continuous when every day strictly between the
 	// last active day and today is a recorded leave day (streak freeze).
-	db.Pool.Exec(ctx, `
+	db.Exec(ctx, `
 		WITH s AS (SELECT streak_last_date AS last FROM students WHERE id = $1),
 		gap AS (
 		  SELECT d::date AS d
@@ -606,7 +617,7 @@ func decideTagLifecycle(sessionWeak map[string]bool, tested map[string]tagStat) 
 // after grades are persisted, so ai_score is always set for open answers.
 func sessionTagStats(ctx context.Context, sessionID string) map[string]tagStat {
 	stats := map[string]tagStat{}
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT lower(trim(kc)) AS tag,
 		       COUNT(*) AS total,
 		       COUNT(*) FILTER (WHERE (sa.chosen_option IS NOT NULL AND sa.is_correct)
@@ -645,7 +656,7 @@ func sessionWeakSet(ctx context.Context, sessionID string, aiWeak []string) map[
 		add(w)
 	}
 
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT q.key_concepts
 		FROM session_answers sa
 		JOIN questions q ON q.id = sa.question_id
@@ -677,7 +688,7 @@ func updateWeakConceptLifecycle(ctx context.Context, studentID, conceptID string
 	wrongTags, progressTags := decideTagLifecycle(sessionWeak, tested)
 
 	for _, tag := range wrongTags {
-		db.Pool.Exec(ctx, `
+		db.Exec(ctx, `
 			INSERT INTO student_weak_concepts
 			  (student_id, concept_id, tag, wrong_count, correct_streak, status)
 			VALUES ($1, $2, $3, 1, 0, 'active')
@@ -691,7 +702,7 @@ func updateWeakConceptLifecycle(ctx context.Context, studentID, conceptID string
 	}
 
 	if len(progressTags) > 0 {
-		db.Pool.Exec(ctx, `
+		db.Exec(ctx, `
 			UPDATE student_weak_concepts
 			SET correct_streak = correct_streak + 1,
 			    status     = CASE WHEN correct_streak + 1 >= 2 THEN 'cleared' ELSE status END,

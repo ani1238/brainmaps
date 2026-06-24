@@ -51,7 +51,7 @@ func SetParentPin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var existing *string
-	db.Pool.QueryRow(r.Context(), `SELECT parent_pin_hash FROM users WHERE id = $1`, userID).Scan(&existing)
+	db.QueryRow(r.Context(), `SELECT parent_pin_hash FROM users WHERE id = $1`, userID).Scan(&existing)
 	if existing != nil && *existing != "" {
 		// Changing an existing PIN requires the current one. 403 (not 401) so the
 		// client's expired-session logout logic doesn't trigger on a wrong PIN.
@@ -66,7 +66,7 @@ func SetParentPin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
-	if _, err := db.Pool.Exec(r.Context(), `UPDATE users SET parent_pin_hash = $1, updated_at = now() WHERE id = $2`, hash, userID); err != nil {
+	if _, err := db.Exec(r.Context(), `UPDATE users SET parent_pin_hash = $1, updated_at = now() WHERE id = $2`, hash, userID); err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
@@ -82,7 +82,7 @@ func ReportStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var existing *string
-	db.Pool.QueryRow(r.Context(), `SELECT parent_pin_hash FROM users WHERE id = $1`, userID).Scan(&existing)
+	db.QueryRow(r.Context(), `SELECT parent_pin_hash FROM users WHERE id = $1`, userID).Scan(&existing)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"pinSet": existing != nil && *existing != ""})
 }
@@ -111,7 +111,7 @@ func GetParentReport(w http.ResponseWriter, r *http.Request) {
 	// Latest stored report, if any.
 	var reportID string
 	var payload []byte
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.QueryRow(r.Context(), `
 		SELECT id, payload FROM parent_reports
 		WHERE student_id = $1 ORDER BY generated_at DESC LIMIT 1
 	`, studentID).Scan(&reportID, &payload)
@@ -180,7 +180,7 @@ func GetParentReportItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload []byte
-	if err := db.Pool.QueryRow(r.Context(), `
+	if err := db.QueryRow(r.Context(), `
 		SELECT payload FROM parent_reports WHERE id = $1 AND student_id = $2
 	`, req.ID, studentID).Scan(&payload); err != nil || len(payload) == 0 {
 		http.Error(w, "report not found", http.StatusNotFound)
@@ -195,7 +195,7 @@ func GetParentReportItem(w http.ResponseWriter, r *http.Request) {
 // id. On failure it returns a non-zero HTTP status and message.
 func reportStudentForPin(ctx context.Context, userID, pin string) (string, int, string) {
 	var pinHash *string
-	db.Pool.QueryRow(ctx, `SELECT parent_pin_hash FROM users WHERE id = $1`, userID).Scan(&pinHash)
+	db.QueryRow(ctx, `SELECT parent_pin_hash FROM users WHERE id = $1`, userID).Scan(&pinHash)
 	if pinHash == nil || *pinHash == "" {
 		return "", http.StatusBadRequest, "parent PIN not set"
 	}
@@ -219,7 +219,7 @@ func generateAndStore(ctx context.Context, studentID string) (string, []byte, er
 	}
 	payload, _ := json.Marshal(rep)
 	var id string
-	if err := db.Pool.QueryRow(ctx, `
+	if err := db.QueryRow(ctx, `
 		INSERT INTO parent_reports (student_id, report_date, payload)
 		VALUES ($1, current_date, $2)
 		RETURNING id
@@ -245,7 +245,7 @@ type reportBundleResp struct {
 // history and this week's generation count.
 func writeReportBundle(ctx context.Context, w http.ResponseWriter, studentID, reportID string, payload []byte) {
 	history := []reportHistoryItem{}
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT id, generated_at FROM parent_reports
 		WHERE student_id = $1 ORDER BY generated_at DESC LIMIT 50
 	`, studentID)
@@ -260,7 +260,7 @@ func writeReportBundle(ctx context.Context, w http.ResponseWriter, studentID, re
 	}
 
 	var weeklyCount int
-	db.Pool.QueryRow(ctx, `
+	db.QueryRow(ctx, `
 		SELECT COUNT(*) FROM parent_reports
 		WHERE student_id = $1 AND generated_at >= date_trunc('week', now())
 	`, studentID).Scan(&weeklyCount)

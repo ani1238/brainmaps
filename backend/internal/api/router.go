@@ -44,6 +44,7 @@ func NewRouter() http.Handler {
 		// ── Protected: all data routes require a valid user session ──────────
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.RequireAuth)
+			r.Use(authmw.RLSContext) // per-request transaction + RLS identity (app.student_id)
 
 			// Authenticated learner profile (class + board + 1:1 student id)
 			r.Get("/auth/me", handlers.Me)

@@ -57,7 +57,7 @@ func StudentForUser(ctx context.Context) (string, bool) {
 		return "", false
 	}
 	var studentID string
-	if err := db.Pool.QueryRow(ctx, `
+	if err := db.QueryRow(ctx, `
 		SELECT id FROM students WHERE user_id = $1
 	`, userID).Scan(&studentID); err != nil {
 		return "", false
@@ -73,7 +73,7 @@ func AuthorizeStudent(r *http.Request, studentID string) bool {
 		return false
 	}
 	var exists bool
-	db.Pool.QueryRow(r.Context(), `
+	db.QueryRow(r.Context(), `
 		SELECT EXISTS(
 			SELECT 1 FROM students
 			WHERE id = $1 AND user_id = $2
@@ -99,7 +99,7 @@ func Role(ctx context.Context) (string, bool) {
 		return "", false
 	}
 	var role string
-	if err := db.Pool.QueryRow(ctx, `SELECT role FROM users WHERE id = $1`, userID).Scan(&role); err != nil {
+	if err := db.QueryRow(ctx, `SELECT role FROM users WHERE id = $1`, userID).Scan(&role); err != nil {
 		return "", false
 	}
 	return role, true
@@ -114,5 +114,65 @@ func RequireAdmin(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// statusRecorder captures the response status so the RLS middleware can decide
+// whether to commit or roll back the request transaction.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+// RLSContext opens a per-request transaction and sets the row-level-security
+// identity (app.student_id = the JWT's student id) so Postgres policies scope
+// every query to the authenticated student. Must run after RequireAuth. The
+// transaction commits on success and rolls back on a panic or 5xx.
+func RLSContext(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sid, _ := r.Context().Value(studentIDKey).(string)
+		if sid == "" {
+			// No student bound to this token — nothing to scope; RLS tables will
+			// simply return no rows. Proceed without a transaction.
+			next.ServeHTTP(w, r)
+			return
+		}
+		conn, err := db.Pool.Acquire(r.Context())
+		if err != nil {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		defer conn.Release()
+		tx, err := conn.Begin(r.Context())
+		if err != nil {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if _, err := tx.Exec(r.Context(), "SELECT set_config('app.student_id', $1, true)", sid); err != nil {
+			tx.Rollback(r.Context())
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		committed := false
+		defer func() {
+			if p := recover(); p != nil {
+				tx.Rollback(context.Background())
+				panic(p)
+			}
+			if !committed {
+				if rec.status >= 500 {
+					tx.Rollback(context.Background())
+				} else {
+					tx.Commit(context.Background())
+				}
+			}
+		}()
+		next.ServeHTTP(rec, r.WithContext(db.WithQuerier(r.Context(), tx)))
 	})
 }

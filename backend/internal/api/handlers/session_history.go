@@ -40,7 +40,7 @@ func ListConceptSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	level := strings.TrimSpace(r.URL.Query().Get("level"))
 
-	rows, err := db.Pool.Query(r.Context(), `
+	rows, err := db.Query(r.Context(), `
 		SELECT id, station, COALESCE(score, 0), completed_at
 		FROM sessions
 		WHERE student_id = $1
@@ -88,7 +88,7 @@ func GetSessionReportByStudent(w http.ResponseWriter, r *http.Request) {
 
 	// Ownership + completion check, scoped to the authenticated student.
 	var owned bool
-	if err := db.Pool.QueryRow(r.Context(), `
+	if err := db.QueryRow(r.Context(), `
 		SELECT EXISTS(
 			SELECT 1 FROM sessions
 			WHERE id = $1 AND student_id = $2 AND completed_at IS NOT NULL
@@ -118,7 +118,7 @@ func GetSessionReportByStudent(w http.ResponseWriter, r *http.Request) {
 func loadSessionReview(ctx context.Context, sessionID string) (models.SessionReview, bool, error) {
 	var review models.SessionReview
 	var score *float64
-	err := db.Pool.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		SELECT s.id, s.concept_id, c.name, s.station, s.score
 		FROM sessions s
 		JOIN concepts c ON c.id = s.concept_id
@@ -137,7 +137,7 @@ func loadSessionReview(ctx context.Context, sessionID string) (models.SessionRev
 		review.Score = *score
 	}
 
-	rows, err := db.Pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT
 			sa.question_id,
 			q.type,

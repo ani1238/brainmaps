@@ -189,7 +189,7 @@ func RegisterUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := db.Pool.Begin(r.Context())
+	tx, err := db.Begin(r.Context())
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
@@ -268,7 +268,7 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 
 	var userID, name, pwHash, board string
 	var grade int
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.QueryRow(r.Context(), `
 		SELECT id, name, grade, board, password_hash
 		FROM users
 		WHERE lower(email) = $1
@@ -280,7 +280,7 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var studentID string
-	if err := db.Pool.QueryRow(r.Context(), `
+	if err := db.QueryRow(r.Context(), `
 		SELECT id FROM students WHERE user_id = $1
 	`, userID).Scan(&studentID); err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
@@ -292,7 +292,7 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
-	db.Pool.Exec(r.Context(), `
+	db.Exec(r.Context(), `
 		INSERT INTO auth_sessions (user_id, token_hash, user_agent, ip_address)
 		VALUES ($1, $2, $3, $4)
 	`, userID, refreshHash, r.UserAgent(), r.RemoteAddr)
@@ -321,7 +321,7 @@ func RefreshSession(w http.ResponseWriter, r *http.Request) {
 
 	// Atomically consume the old refresh token (rotation).
 	var userID string
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.QueryRow(r.Context(), `
 		DELETE FROM auth_sessions
 		 WHERE token_hash = $1 AND expires_at > now()
 		RETURNING user_id
@@ -332,14 +332,14 @@ func RefreshSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var studentID string
-	db.Pool.QueryRow(r.Context(), `SELECT id FROM students WHERE user_id = $1`, userID).Scan(&studentID)
+	db.QueryRow(r.Context(), `SELECT id FROM students WHERE user_id = $1`, userID).Scan(&studentID)
 
 	access, refreshPlain, refreshHash, err := mintTokens(userID, studentID)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
-	db.Pool.Exec(r.Context(), `
+	db.Exec(r.Context(), `
 		INSERT INTO auth_sessions (user_id, token_hash, user_agent, ip_address)
 		VALUES ($1, $2, $3, $4)
 	`, userID, refreshHash, r.UserAgent(), r.RemoteAddr)
@@ -359,7 +359,7 @@ func LogoutUser(w http.ResponseWriter, r *http.Request) {
 	var req refreshReq
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.RefreshToken != "" {
-		db.Pool.Exec(r.Context(), `DELETE FROM auth_sessions WHERE token_hash = $1`,
+		db.Exec(r.Context(), `DELETE FROM auth_sessions WHERE token_hash = $1`,
 			auth.HashToken(req.RefreshToken))
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -377,11 +377,11 @@ func ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	addr := strings.ToLower(strings.TrimSpace(req.Email))
 
 	var userID string
-	err := db.Pool.QueryRow(r.Context(), `SELECT id FROM users WHERE lower(email) = $1`, addr).Scan(&userID)
+	err := db.QueryRow(r.Context(), `SELECT id FROM users WHERE lower(email) = $1`, addr).Scan(&userID)
 	if err == nil {
 		plain, hash, terr := auth.NewRefreshToken()
 		if terr == nil {
-			db.Pool.Exec(r.Context(), `
+			db.Exec(r.Context(), `
 				INSERT INTO recovery_tokens (user_id, token_hash) VALUES ($1, $2)
 			`, userID, hash)
 			resetURL := appBaseURL() + "/reset?token=" + plain
@@ -410,7 +410,7 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 
 	// Atomically consume the reset token.
 	var userID string
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.QueryRow(r.Context(), `
 		UPDATE recovery_tokens
 		   SET used_at = now()
 		 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
@@ -426,9 +426,9 @@ func ResetPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
-	db.Pool.Exec(r.Context(), `UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`, pwHash, userID)
+	db.Exec(r.Context(), `UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`, pwHash, userID)
 	// Revoke every active session for safety.
-	db.Pool.Exec(r.Context(), `DELETE FROM auth_sessions WHERE user_id = $1`, userID)
+	db.Exec(r.Context(), `DELETE FROM auth_sessions WHERE user_id = $1`, userID)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -446,7 +446,7 @@ func Me(w http.ResponseWriter, r *http.Request) {
 	var name, board, studentID string
 	var grade int
 	var role string
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.QueryRow(r.Context(), `
 		SELECT u.name, u.grade, u.board, u.role, s.id
 		FROM users u
 		JOIN students s ON s.user_id = u.id

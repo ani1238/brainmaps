@@ -23,7 +23,7 @@ func GetSessionReview(w http.ResponseWriter, r *http.Request) {
 
 	var review models.SessionReview
 	var score *float64
-	err := db.Pool.QueryRow(r.Context(), `
+	err := db.QueryRow(r.Context(), `
 		SELECT s.id, s.concept_id, c.name, s.station, s.score
 		FROM sessions s
 		JOIN concepts c ON c.id = s.concept_id
@@ -43,7 +43,7 @@ func GetSessionReview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ungraded int
-	if err := db.Pool.QueryRow(r.Context(), `
+	if err := db.QueryRow(r.Context(), `
 		SELECT COUNT(*)
 		FROM session_answers
 		WHERE session_id = $1
@@ -63,7 +63,7 @@ func GetSessionReview(w http.ResponseWriter, r *http.Request) {
 		review.Score = *score
 	}
 
-	rows, err := db.Pool.Query(r.Context(), `
+	rows, err := db.Query(r.Context(), `
 		SELECT
 			sa.question_id,
 			q.type,
