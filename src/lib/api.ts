@@ -299,6 +299,8 @@ export interface ApiChapter {
   number: number;
   orderIdx: number;
   conceptCount: number;
+  mastered: number;
+  inProgress: number;
 }
 
 interface ApiProgress {
