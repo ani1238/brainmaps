@@ -72,25 +72,34 @@ type Trend struct {
 	Caption   string `json:"caption"` // AI prose
 }
 
+// CarelessConcept estimates, among recent wrong answers, how much of the
+// weakness is a genuine concept gap (the learner took time and still missed it)
+// vs just rushing. 0 = mostly rushing, 100 = mostly a real concept gap.
+type CarelessConcept struct {
+	ConceptGapPct int    `json:"conceptGapPct"`
+	Verdict       string `json:"verdict"` // AI prose
+}
+
 // Report is the cached parent-report payload.
 type Report struct {
-	StudentName  string        `json:"studentName"`
-	WeekStart    string        `json:"weekStart"`
-	WeekEnd      string        `json:"weekEnd"`
-	WeekNumber   int           `json:"weekNumber"`
-	FocusSubject string        `json:"focusSubject"`
-	Headline     string        `json:"headline"`
-	Narrative    string        `json:"narrative"`
-	Suggestion   string        `json:"suggestion"`
-	Win          *Highlight    `json:"win,omitempty"`
-	Gap          *Gap          `json:"gap,omitempty"`
-	Voice        *StudentVoice `json:"voice,omitempty"`
-	AskTonight   *AskTonight   `json:"askTonight,omitempty"`
-	Trend        *Trend        `json:"trend,omitempty"`
-	Effort       Effort        `json:"effort"`
-	Mastery      Mastery       `json:"mastery"`
-	Improving    []Improving   `json:"improving"`
-	FocusAreas   []FocusArea   `json:"focusAreas"`
+	StudentName  string           `json:"studentName"`
+	WeekStart    string           `json:"weekStart"`
+	WeekEnd      string           `json:"weekEnd"`
+	WeekNumber   int              `json:"weekNumber"`
+	FocusSubject string           `json:"focusSubject"`
+	Headline     string           `json:"headline"`
+	Narrative    string           `json:"narrative"`
+	Suggestion   string           `json:"suggestion"`
+	Win          *Highlight       `json:"win,omitempty"`
+	Gap          *Gap             `json:"gap,omitempty"`
+	Voice        *StudentVoice    `json:"voice,omitempty"`
+	AskTonight   *AskTonight      `json:"askTonight,omitempty"`
+	Trend        *Trend           `json:"trend,omitempty"`
+	Careless     *CarelessConcept `json:"careless,omitempty"`
+	Effort       Effort           `json:"effort"`
+	Mastery      Mastery          `json:"mastery"`
+	Improving    []Improving      `json:"improving"`
+	FocusAreas   []FocusArea      `json:"focusAreas"`
 }
 
 // Generate builds a fresh report for the given student from the last 7 days.
@@ -271,6 +280,29 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 		WHERE s.student_id = $1 AND sa.answered_at >= now() - interval '30 days'
 	`, studentID).Scan(&recallPct, &applyPct)
 
+	// ── Careless vs concept: among recent wrong answers that have timing, what
+	// share were "considered" (took real time) rather than rushed? ───────────
+	var totalWrong, consideredWrong int
+	db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE wrong),
+		       COUNT(*) FILTER (WHERE wrong AND considered)
+		FROM (
+		  SELECT
+		    (CASE WHEN sa.question_type IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
+		          THEN sa.is_correct = false
+		          ELSE sa.ai_score IS NOT NULL AND sa.ai_score < 0.6 END) AS wrong,
+		    (sa.elapsed_ms >= CASE WHEN sa.question_type IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON')
+		                           THEN 4000 ELSE 12000 END) AS considered
+		  FROM session_answers sa JOIN sessions s ON s.id = sa.session_id
+		  WHERE s.student_id = $1 AND sa.elapsed_ms IS NOT NULL
+		    AND sa.answered_at >= now() - interval '30 days'
+		) t
+	`, studentID).Scan(&totalWrong, &consideredWrong)
+	conceptGapPct := -1
+	if totalWrong >= 4 {
+		conceptGapPct = (100*consideredWrong + totalWrong/2) / totalWrong
+	}
+
 	// ── One structured AI pass fills all the prose ───────────────────────────
 	note := generateNote(ctx, rep, feedback, noteInputs{
 		gapConcept:    gapConcept,
@@ -280,6 +312,7 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 		voiceFeedback: voiceFeedback,
 		recallPct:     recallPct,
 		applyPct:      applyPct,
+		conceptGapPct: conceptGapPct,
 	})
 
 	rep.Headline = note.Headline
@@ -301,6 +334,9 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 	if recallPct != nil && applyPct != nil {
 		rep.Trend = &Trend{RecallPct: *recallPct, ApplyPct: *applyPct, Caption: note.TrendCaption}
 	}
+	if conceptGapPct >= 0 {
+		rep.Careless = &CarelessConcept{ConceptGapPct: conceptGapPct, Verdict: note.CarelessVerdict}
+	}
 	return rep, nil
 }
 
@@ -312,6 +348,7 @@ type noteInputs struct {
 	voiceFeedback string
 	recallPct     *int
 	applyPct      *int
+	conceptGapPct int
 }
 
 type noteOutput struct {
@@ -324,6 +361,7 @@ type noteOutput struct {
 	TonightQuestion string `json:"tonightQuestion"`
 	TonightHint     string `json:"tonightHint"`
 	TrendCaption    string `json:"trendCaption"`
+	CarelessVerdict string `json:"carelessVerdict"`
 }
 
 // generateNote runs a single AI pass that fills every prose field of the report
@@ -366,6 +404,9 @@ func generateNote(ctx context.Context, rep Report, feedback []string, in noteInp
 	if in.recallPct != nil && in.applyPct != nil {
 		sb.WriteString(fmt.Sprintf("\nSkill split: remembering facts %d/100, applying ideas to new situations %d/100.\n", *in.recallPct, *in.applyPct))
 	}
+	if in.conceptGapPct >= 0 {
+		sb.WriteString(fmt.Sprintf("When the child gets something wrong, how much is a genuine concept gap vs just rushing: %d/100 (0 = nearly all rushing/careless, 100 = nearly all a real concept gap, i.e. they took their time and still missed it).\n", in.conceptGapPct))
+	}
 	if len(feedback) > 0 {
 		sb.WriteString("\nMore per-answer feedback for context (do not quote verbatim):\n")
 		for i, f := range feedback {
@@ -380,7 +421,7 @@ func generateNote(ctx context.Context, rep Report, feedback []string, in noteInp
 	}
 
 	sb.WriteString("\nReturn JSON ONLY with these keys (omit a key only if you truly have nothing for it):\n")
-	sb.WriteString("{\"headline\":\"...\",\"narrative\":\"...\",\"suggestion\":\"...\",\"winDetail\":\"...\",\"gapExplanation\":\"...\",\"voiceNote\":\"...\",\"tonightQuestion\":\"...\",\"tonightHint\":\"...\",\"trendCaption\":\"...\"}\n")
+	sb.WriteString("{\"headline\":\"...\",\"narrative\":\"...\",\"suggestion\":\"...\",\"winDetail\":\"...\",\"gapExplanation\":\"...\",\"voiceNote\":\"...\",\"tonightQuestion\":\"...\",\"tonightHint\":\"...\",\"trendCaption\":\"...\",\"carelessVerdict\":\"...\"}\n")
 	sb.WriteString("headline: ONE warm sentence summarising the week for " + name + ", e.g. how far they've come on a concept. No scores.\n")
 	sb.WriteString("narrative: 2-3 short sentences to the parent, first name, no scores, no bullets.\n")
 	sb.WriteString("suggestion: ONE concrete thing the parent can do this week to help (specific, kind, doable at home).\n")
@@ -397,6 +438,9 @@ func generateNote(ctx context.Context, rep Report, feedback []string, in noteInp
 	}
 	if in.recallPct != nil && in.applyPct != nil {
 		sb.WriteString("trendCaption: ONE sentence comparing how the child is doing on remembering vs applying (use qualitatively, do not quote the numbers).\n")
+	}
+	if in.conceptGapPct >= 0 {
+		sb.WriteString("carelessVerdict: ONE reassuring sentence telling the parent whether the wrong answers are mostly careless rushing or a genuine concept gap, and what that means for how to help (a chat helps a concept gap; slowing down helps rushing). Do not quote the number.\n")
 	}
 
 	out := noteOutput{}

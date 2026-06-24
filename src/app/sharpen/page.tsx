@@ -303,6 +303,8 @@ function SharpenContent() {
   const [correctCount, setCorrectCount] = useState(0);
   const [mcqCount, setMcqCount] = useState(0);
   const collectedAnswers = useRef<SubmitAnswer[]>([]);
+  // When the current question first appeared — used to measure time-on-task.
+  const questionStartRef = useRef<number>(0);
 
   // ── API session (only when we have real DB-backed question IDs) ─────────
   const sessionRef = useRef<ActiveSession | null>(null);
@@ -382,17 +384,23 @@ function SharpenContent() {
   // Stop polling on unmount
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
+  // Reset the time-on-task clock each time a new question is shown.
+  useEffect(() => { questionStartRef.current = Date.now(); }, [currentIdx, questions]);
+
   function handleAnswer(correct: boolean) {
     setMcqCount(n => n + 1);
     if (correct) setCorrectCount(n => n + 1);
   }
 
   function handleSubmitAnswer(payload: AnswerPayload) {
+    // Cap at 5 min so a walk-away doesn't pollute the careless-vs-concept signal.
+    const elapsedMs = Math.min(Date.now() - questionStartRef.current, 300_000);
     collectedAnswers.current.push({
       questionId:   payload.questionId,
       questionType: payload.questionType,
       chosenOption: payload.chosenOption,
       studentText:  payload.studentText,
+      elapsedMs,
     });
   }
 
