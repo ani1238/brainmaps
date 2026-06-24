@@ -7,7 +7,7 @@ import { GridBackground } from './GridBackground';
 import { RightPanel } from './RightPanel';
 import type { Concept } from '@/types';
 import { CONCEPT_DATA, CONCEPT_BY_ID, ENGLISH_TRACKS } from '@/data/dummy';
-import { fetchChapters, fetchConcept, fetchConcepts, fetchToday, type ApiChapter, type ApiConceptDetail } from '@/lib/api';
+import { fetchChapters, fetchConcept, fetchConcepts, fetchToday, fetchDashboard, type ApiChapter, type ApiConceptDetail, type ApiDashboard } from '@/lib/api';
 import { assessmentHref } from '@/lib/navigation';
 
 type MapLevel = 'subject' | 'chapter' | 'concept' | 'english';
@@ -25,6 +25,17 @@ function polarPos(cx: number, cy: number, r: number, i: number, total: number, o
 
 function masteryColor(state: MasteryState) {
   return MASTERY_MAP[state].color;
+}
+
+// Colour for one station segment in the concept-node level bar. `active` marks
+// the station currently being worked on (it pulses).
+function segColor(state?: string): { bg: string; active: boolean } {
+  switch (state) {
+    case 'done':         return { bg: COLORS.strong, active: false };
+    case 'needs_fixing': return { bg: COLORS.weak, active: true };
+    case 'current':      return { bg: COLORS.indigo, active: true };
+    default:             return { bg: 'rgba(0,0,0,0.12)', active: false };
+  }
 }
 
 // Build a panel-ready Concept from a single-concept API payload.
@@ -102,6 +113,27 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       .then(t => setQueueCounts({ fix: t.fixQueue.length, revise: t.reviseQueue.length }))
       .catch(() => {});
   }, []);
+
+  // Per-subject progress (for the subject-bubble markers). English aggregates
+  // its tracks (english_vocab, english_grammar, …) into one node.
+  const [subjects, setSubjects] = useState<ApiDashboard['subjects']>([]);
+  useEffect(() => {
+    fetchDashboard().then(d => setSubjects(d.subjects)).catch(() => {});
+  }, []);
+  function subjectProgress(key: string): { pct: number; mastered: number; total: number; inProgress: number } {
+    const rows = key === 'english'
+      ? subjects.filter(s => s.key.startsWith('english'))
+      : subjects.filter(s => s.key === key);
+    const total = rows.reduce((a, s) => a + s.total, 0);
+    const mastered = rows.reduce((a, s) => a + s.strong, 0);
+    const attempted = rows.reduce((a, s) => a + s.attempted, 0);
+    return {
+      total,
+      mastered,
+      inProgress: Math.max(0, attempted - mastered),
+      pct: total > 0 ? Math.round((mastered / total) * 100) : 0,
+    };
+  }
 
   // Measure the actual container so the orbit centers and scales to any screen
   // (the component is also given sensible defaults for SSR / first paint).
@@ -366,6 +398,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
         <SubjectNodes
           key={`subj-${navKey}`}
           cx={orbitCx} cy={cy} r={rSubject} scale={nodeScale}
+          progressFor={subjectProgress}
           onSelect={zoomToSubject}
         />
       )}
@@ -538,16 +571,22 @@ function CenterNode({
   return null;
 }
 
-function SubjectNodes({ cx, cy, r, scale = 1, onSelect }: {
+function SubjectNodes({ cx, cy, r, scale = 1, progressFor, onSelect }: {
   cx: number; cy: number; r: number; scale?: number;
+  progressFor: (key: string) => { pct: number; mastered: number; total: number; inProgress: number };
   onSelect: (key: string, label: string) => void;
 }) {
   return (
     <>
       {SUBJECTS.map((s, i) => {
         const { x, y } = polarPos(cx, cy, r, i, SUBJECTS.length);
-        const hasDue = false;
-        const subtitle = s.key === 'english' ? '5 tracks' : 'tap to explore';
+        const prog = progressFor(s.key);
+        const hasDue = prog.inProgress > 0;
+        const subtitle = prog.total > 0
+          ? `${prog.mastered}/${prog.total} mastered`
+          : (s.key === 'english' ? '5 tracks' : 'tap to explore');
+        // progress arc geometry (r=44 within a 96px box)
+        const circ = 2 * Math.PI * 44;
         return (
           <div
             key={s.key}
@@ -561,8 +600,18 @@ function SubjectNodes({ cx, cy, r, scale = 1, onSelect }: {
             onClick={() => onSelect(s.key, s.label)}
           >
             <div className="relative w-24 h-24">
+              {/* mastery progress ring */}
+              <svg className="absolute inset-0 -rotate-90" width="96" height="96" viewBox="0 0 96 96">
+                <circle cx="48" cy="48" r="44" fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="4" />
+                {prog.pct > 0 && (
+                  <circle
+                    cx="48" cy="48" r="44" fill="none" stroke={COLORS.strong} strokeWidth="4" strokeLinecap="round"
+                    strokeDasharray={`${(prog.pct / 100) * circ} ${circ}`}
+                  />
+                )}
+              </svg>
               {/* glass disc */}
-              <div className="w-24 h-24 rounded-full transition-all group-hover:scale-110 group-active:scale-95"
+              <div className="absolute inset-1 rounded-full transition-all group-hover:scale-105 group-active:scale-95"
                 style={{
                   background: 'rgba(255,255,255,0.75)',
                   backdropFilter: 'blur(8px)',
@@ -571,14 +620,11 @@ function SubjectNodes({ cx, cy, r, scale = 1, onSelect }: {
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                 <div className="flex flex-col items-center">
-                  <span style={{ fontSize: 28 }}>{s.icon}</span>
+                  <span style={{ fontSize: 26 }}>{s.icon}</span>
                   <span className="text-xs font-bold mt-0.5" style={{ color: s.color }}>{s.letter}</span>
                 </div>
               </div>
-              {/* inner colored ring */}
-              <div className="absolute inset-3 rounded-full opacity-30"
-                style={{ border: `2.5px solid ${s.color}` }} />
-              {/* dueForRecall badge */}
+              {/* "work in progress here" badge */}
               {hasDue && (
                 <div
                   className="absolute top-0.5 right-1 w-3.5 h-3.5 rounded-full animate-recall-pulse"
@@ -619,6 +665,9 @@ function ChapterNodes({ cx, cy, r, chapters, subjectColor, scale = 1, onSelect }
     <>
       {chapters.map((ch, i) => {
         const { x, y } = polarPos(cx, cy, r, i, chapters.length);
+        const pct = ch.conceptCount > 0 ? ch.mastered / ch.conceptCount : 0;
+        const circ = 2 * Math.PI * 36;
+        const fullyDone = ch.conceptCount > 0 && ch.mastered === ch.conceptCount;
         return (
           <div
             key={ch.id}
@@ -632,9 +681,13 @@ function ChapterNodes({ cx, cy, r, chapters, subjectColor, scale = 1, onSelect }
             onClick={() => onSelect(ch.id, ch.name)}
           >
             <div className="relative w-20 h-20">
-              {/* orbit ring (empty — no mastery data yet) */}
+              {/* mastery progress ring */}
               <svg className="absolute inset-0 -rotate-90" width="80" height="80" viewBox="0 0 80 80">
                 <circle cx="40" cy="40" r="36" fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="4" />
+                {pct > 0 && (
+                  <circle cx="40" cy="40" r="36" fill="none" stroke={COLORS.strong} strokeWidth="4" strokeLinecap="round"
+                    strokeDasharray={`${pct * circ} ${circ}`} />
+                )}
               </svg>
               {/* chapter disc */}
               <div className="absolute inset-2 rounded-full flex flex-col items-center justify-center transition-all group-hover:scale-105"
@@ -642,9 +695,28 @@ function ChapterNodes({ cx, cy, r, chapters, subjectColor, scale = 1, onSelect }
                   background: `${subjectColor}15`,
                   border: `1.5px solid ${subjectColor}44`,
                 }}>
-                <div className="text-[11px] font-bold" style={{ color: subjectColor }}>{ch.conceptCount}</div>
-                <div className="text-[9px] font-mono" style={{ color: subjectColor + 'aa' }}>concepts</div>
+                {ch.mastered > 0 || ch.inProgress > 0 ? (
+                  <>
+                    <div className="text-[12px] font-extrabold" style={{ color: subjectColor }}>{ch.mastered}/{ch.conceptCount}</div>
+                    <div className="text-[8px] font-mono" style={{ color: subjectColor + 'aa' }}>mastered</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-[11px] font-bold" style={{ color: subjectColor }}>{ch.conceptCount}</div>
+                    <div className="text-[9px] font-mono" style={{ color: subjectColor + 'aa' }}>concepts</div>
+                  </>
+                )}
               </div>
+              {/* fully-mastered tick */}
+              {fullyDone && (
+                <div className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-black text-white"
+                  style={{ background: COLORS.strong, border: '2px solid white' }}>✓</div>
+              )}
+              {/* "work in progress here" badge */}
+              {!fullyDone && ch.inProgress > 0 && (
+                <div className="absolute top-0 right-0.5 w-3 h-3 rounded-full animate-recall-pulse"
+                  style={{ background: '#f97316', border: '2px solid white' }} />
+              )}
             </div>
             <div className="mt-2 text-center" style={{ maxWidth: 120 }}>
               <div className="text-xs font-semibold leading-snug" style={{ color: '#1c1917' }}>{ch.name}</div>
@@ -714,6 +786,23 @@ function ConceptNodes({ cx, cy, r, chapterId, scale = 1, onSelect }: {
                 />
               )}
             </div>
+            {/* level progress: L1 · L2 · L3 · Strengthen · Revise.
+                green = cleared, indigo = current (being worked on now),
+                orange = needs fixing, faint = locked. */}
+            {(c.l1State || c.l2State || c.l3State || c.strengthenState || c.reviseState) && (
+              <div className="flex gap-0.5 mt-1.5">
+                {[c.l1State, c.l2State, c.l3State, c.strengthenState, c.reviseState].map((st, si) => {
+                  const sc = segColor(st);
+                  return (
+                    <span
+                      key={si}
+                      className={`rounded-full ${sc.active ? 'animate-pulse' : ''}`}
+                      style={{ width: 7, height: 4, background: sc.bg }}
+                    />
+                  );
+                })}
+              </div>
+            )}
             <div className="mt-1.5 text-center" style={{ maxWidth: 100 }}>
               <div className="text-[11px] font-semibold leading-snug" style={{ color: '#44403c' }}>{c.name}</div>
             </div>
