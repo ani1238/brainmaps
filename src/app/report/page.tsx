@@ -250,7 +250,9 @@ function ReportControls({ weeklyCount, generating, history, activeId, onGenerate
             className="text-xs font-bold"
             style={{ color: COLORS.indigo }}
           >
-            {showHistory ? 'Hide previous reports' : `Previous reports (${history.length})`}
+            {showHistory
+              ? (history.length > 1 ? 'Hide previous reports' : 'Hide reports')
+              : (history.length > 1 ? `Previous reports (${history.length})` : 'Show reports')}
           </button>
           {showHistory && (
             <div className="flex flex-col gap-2 mt-2">
