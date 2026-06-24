@@ -7,11 +7,20 @@ import { COLORS } from '@/lib/tokens';
 import {
   getReportStatus,
   setParentPin,
-  fetchParentReport,
+  unlockReports,
+  generateReport,
+  fetchReportItem,
   type ParentReport,
+  type ReportHistoryItem,
 } from '@/lib/api';
 
 type Phase = 'loading' | 'create-pin' | 'enter-pin' | 'report';
+
+function formatGeneratedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Report';
+  return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+}
 
 export default function ParentReportPage() {
   const [phase, setPhase] = useState<Phase>('loading');
@@ -20,14 +29,21 @@ export default function ParentReportPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<ParentReport | null>(null);
+  const [history, setHistory] = useState<ReportHistoryItem[]>([]);
+  const [weeklyCount, setWeeklyCount] = useState(0);
+  const [activeId, setActiveId] = useState('');
+  const [generating, setGenerating] = useState(false);
   const triedAuto = useRef(false);
 
   const loadReport = useCallback(async (p: string) => {
     setBusy(true);
     setError('');
     try {
-      const r = await fetchParentReport(p);
-      setReport(r);
+      const b = await unlockReports(p);
+      setReport(b.report);
+      setHistory(b.history);
+      setWeeklyCount(b.weeklyCount);
+      setActiveId(b.reportId);
       setPhase('report');
     } catch {
       setError('Incorrect PIN. Please try again.');
@@ -35,6 +51,37 @@ export default function ParentReportPage() {
       setBusy(false);
     }
   }, []);
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setError('');
+    try {
+      const b = await generateReport(pin);
+      setReport(b.report);
+      setHistory(b.history);
+      setWeeklyCount(b.weeklyCount);
+      setActiveId(b.reportId);
+    } catch {
+      setError('Could not generate a new report. Please try again.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function handleOpenHistory(id: string) {
+    if (id === activeId || generating) return;
+    setGenerating(true);
+    setError('');
+    try {
+      const r = await fetchReportItem(pin, id);
+      setReport(r);
+      setActiveId(id);
+    } catch {
+      setError('Could not open that report.');
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   useEffect(() => {
     if (triedAuto.current) return;
@@ -143,10 +190,94 @@ export default function ParentReportPage() {
         )}
 
         {phase === 'report' && report && (
-          <ReportView report={report} onLock={() => { setPin(''); setReport(null); setPhase('enter-pin'); }} />
+          <div className="w-full max-w-2xl mx-auto flex flex-col gap-4">
+            <ReportControls
+              weeklyCount={weeklyCount}
+              generating={generating}
+              history={history}
+              activeId={activeId}
+              onGenerate={handleGenerate}
+              onOpen={handleOpenHistory}
+            />
+            {error && (
+              <div className="text-sm px-1" style={{ color: '#ef4444' }}>{error}</div>
+            )}
+            <ReportView
+              report={report}
+              onLock={() => {
+                setPin(''); setReport(null); setHistory([]); setActiveId(''); setWeeklyCount(0); setPhase('enter-pin');
+              }}
+            />
+          </div>
         )}
       </main>
     </div>
+  );
+}
+
+function ReportControls({ weeklyCount, generating, history, activeId, onGenerate, onOpen }: {
+  weeklyCount: number;
+  generating: boolean;
+  history: ReportHistoryItem[];
+  activeId: string;
+  onGenerate: () => void;
+  onOpen: (id: string) => void;
+}) {
+  const [showHistory, setShowHistory] = useState(false);
+  return (
+    <section className="rounded-2xl p-4 flex flex-col gap-3" style={{ background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(0,0,0,0.08)' }}>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-sm font-bold" style={{ color: '#1c1917' }}>Reports</div>
+          <div className="text-[11px]" style={{ color: '#a8a29e' }}>
+            {weeklyCount} generated this week
+          </div>
+        </div>
+        <button
+          onClick={onGenerate}
+          disabled={generating}
+          className="px-4 py-2.5 rounded-xl font-bold text-sm text-white disabled:opacity-60"
+          style={{ background: COLORS.indigo }}
+        >
+          {generating ? 'Generating…' : '✨ Generate new report'}
+        </button>
+      </div>
+
+      {history.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowHistory(s => !s)}
+            className="text-xs font-bold"
+            style={{ color: COLORS.indigo }}
+          >
+            {showHistory ? 'Hide previous reports' : `Previous reports (${history.length})`}
+          </button>
+          {showHistory && (
+            <div className="flex flex-col gap-2 mt-2">
+              {history.map((h) => {
+                const active = h.id === activeId;
+                return (
+                  <button
+                    key={h.id}
+                    onClick={() => onOpen(h.id)}
+                    disabled={generating}
+                    className="flex items-center justify-between px-3 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+                    style={{
+                      background: active ? 'rgba(79,70,229,0.1)' : 'rgba(0,0,0,0.03)',
+                      color: active ? COLORS.indigo : '#44403c',
+                      border: active ? `1px solid ${COLORS.indigo}40` : '1px solid transparent',
+                    }}
+                  >
+                    <span>{formatGeneratedAt(h.generatedAt)}</span>
+                    {active && <span className="text-[10px]">Viewing</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
