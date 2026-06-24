@@ -146,6 +146,7 @@ func Generate(ctx context.Context, studentID string, grade int, board string, s 
 		start = time.Now()
 	}
 	studyDays := daySet(s.StudyDays)
+	leaves := loadLeaves(ctx, studentID)
 
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
@@ -157,12 +158,12 @@ func Generate(ctx context.Context, studentID string, grade int, board string, s 
 		return err
 	}
 
-	day := firstStudyDay(start, studyDays)
+	day := firstOpenDay(start, studyDays, leaves)
 	placedToday := 0
 	orderIdx := 0
 	for _, c := range sequence {
 		if placedToday >= s.NewConceptsPerDay {
-			day = nextStudyDay(day, studyDays)
+			day = nextOpenDay(day, studyDays, leaves)
 			placedToday = 0
 			orderIdx = 0
 		}
@@ -386,8 +387,15 @@ func Items(ctx context.Context, studentID, from, to string) ([]PlanItemDTO, erro
 	return out, nil
 }
 
-// MoveItem reschedules a single plan item to a new date (marks it manual).
+// MoveItem reschedules a single plan item to a new date (marks it manual). If
+// the target lands on a non-study day or a leave day, it snaps forward to the
+// next open working day so nothing gets scheduled on a break.
 func MoveItem(ctx context.Context, studentID string, id int64, newDate string) error {
+	s, _, _ := GetSettings(ctx, studentID)
+	if t, err := time.Parse("2006-01-02", newDate); err == nil {
+		open := firstOpenDay(t, daySet(s.StudyDays), loadLeaves(ctx, studentID))
+		newDate = open.Format("2006-01-02")
+	}
 	_, err := db.Pool.Exec(ctx, `
 		UPDATE plan_items SET planned_date = $3, source = 'manual', updated_at = now()
 		WHERE id = $1 AND student_id = $2
@@ -688,6 +696,63 @@ func addStudyDays(from time.Time, offset int, study map[int]bool) time.Time {
 		d = nextStudyDay(d, study)
 	}
 	return d
+}
+
+// ── leave-aware day stepping ─────────────────────────────────────────────────
+
+type leaveRange struct{ start, end string } // YYYY-MM-DD inclusive
+
+func loadLeaves(ctx context.Context, studentID string) []leaveRange {
+	out := []leaveRange{}
+	rows, err := db.Pool.Query(ctx, `SELECT start_date, end_date FROM plan_leaves WHERE student_id = $1`, studentID)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var s, e time.Time
+		if rows.Scan(&s, &e) == nil {
+			out = append(out, leaveRange{s.Format("2006-01-02"), e.Format("2006-01-02")})
+		}
+	}
+	return out
+}
+
+func inLeave(d time.Time, leaves []leaveRange) bool {
+	ds := d.Format("2006-01-02")
+	for _, l := range leaves {
+		if ds >= l.start && ds <= l.end {
+			return true
+		}
+	}
+	return false
+}
+
+// isOpen reports whether a day is a study day and not within a leave.
+func isOpen(d time.Time, study map[int]bool, leaves []leaveRange) bool {
+	return study[isoWeekday(d)] && !inLeave(d, leaves)
+}
+
+// firstOpenDay returns `t` if it's an open working day, else the next one.
+func firstOpenDay(t time.Time, study map[int]bool, leaves []leaveRange) time.Time {
+	for i := 0; i < 400; i++ {
+		if isOpen(t, study, leaves) {
+			return t
+		}
+		t = t.AddDate(0, 0, 1)
+	}
+	return t
+}
+
+// nextOpenDay returns the next open working day strictly after `t`.
+func nextOpenDay(t time.Time, study map[int]bool, leaves []leaveRange) time.Time {
+	for i := 0; i < 400; i++ {
+		t = t.AddDate(0, 0, 1)
+		if isOpen(t, study, leaves) {
+			return t
+		}
+	}
+	return t
 }
 
 func toIntSlice(in []int32) []int {

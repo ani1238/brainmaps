@@ -41,6 +41,7 @@ export default function PlanPage() {
   const [leaves, setLeaves] = useState<PlanLeave[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [confirmRebuild, setConfirmRebuild] = useState(false);
   const [monthCursor, setMonthCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [selectedDate, setSelectedDate] = useState<string>(todayYmd());
 
@@ -83,6 +84,13 @@ export default function PlanPage() {
   }, [plan?.hasPlan, loadCalendar]);
 
   async function onCreatePlan() {
+    setBusy(true);
+    try { const p = await generatePlan(); setPlan(p); await refreshActive(); }
+    finally { setBusy(false); }
+  }
+
+  async function doRegenerate() {
+    setConfirmRebuild(false);
     setBusy(true);
     try { const p = await generatePlan(); setPlan(p); await refreshActive(); }
     finally { setBusy(false); }
@@ -140,11 +148,52 @@ export default function PlanPage() {
             <ToolsCard
               busy={busy}
               onReflow={async () => { setBusy(true); try { await reflowPlan(); await refreshActive(); } finally { setBusy(false); } }}
-              onRegenerate={async () => { setBusy(true); try { const p = await generatePlan(); setPlan(p); await refreshActive(); } finally { setBusy(false); } }}
+              onRegenerate={() => setConfirmRebuild(true)}
             />
           </>
         )}
+
+        {confirmRebuild && (
+          <RebuildModal busy={busy} onCancel={() => setConfirmRebuild(false)} onConfirm={doRegenerate} />
+        )}
       </main>
+    </div>
+  );
+}
+
+// ── Rebuild confirmation ──────────────────────────────────────────────────────
+function RebuildModal({ busy, onCancel, onConfirm }: { busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(28,25,23,0.45)' }}
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl p-6 flex flex-col gap-3"
+        style={{ background: '#fff', boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="text-3xl">↻</div>
+        <h2 className="text-lg font-extrabold" style={{ color: '#1c1917' }}>Rebuild the whole plan?</h2>
+        <p className="text-sm" style={{ color: '#57534e' }}>
+          This lays out your syllabus fresh from the start date. Any concepts you&apos;ve
+          <strong> moved or skipped will be reset</strong> to the default schedule.
+          Your breaks are kept and still skipped. This can&apos;t be undone.
+        </p>
+        <div className="flex gap-2 justify-end mt-2">
+          <button onClick={onCancel} disabled={busy}
+            className="px-4 py-2 rounded-xl font-bold text-sm disabled:opacity-60"
+            style={{ background: 'rgba(0,0,0,0.05)', color: '#57534e' }}>
+            Cancel
+          </button>
+          <button onClick={onConfirm} disabled={busy}
+            className="px-4 py-2 rounded-xl font-bold text-sm text-white disabled:opacity-60"
+            style={{ background: COLORS.indigo }}>
+            {busy ? 'Rebuilding…' : 'Yes, rebuild'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
