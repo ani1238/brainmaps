@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SUBJECTS, COLORS, MASTERY_MAP, subjectDisplay, type MasteryState } from '@/lib/tokens';
 import { GridBackground } from './GridBackground';
@@ -51,35 +51,49 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Deep-link target: arriving with ?subject=<key> (e.g. from the Today page
-  // subject strip) starts the map inside that subject instead of the picker.
-  // A ?conceptId= deep-link takes precedence and is restored in the effect below.
-  const initialSubjectMeta =
-    !searchParams.get('conceptId') && searchParams.get('subject')
-      ? SUBJECTS.find(s => s.key === searchParams.get('subject'))
-      : undefined;
-  const initialIsEnglish = initialSubjectMeta?.key === 'english';
+  // ── The URL is the single source of truth for the current layer ──────────
+  // subject / chapter / conceptId query params fully describe which layer is
+  // shown, so the in-app back arrow, the native/phone back+forward buttons, and
+  // refresh all behave correctly (every layer is a real history entry).
+  const subjectParam = searchParams.get('subject');
+  const chapterParam = searchParams.get('chapter');
+  const conceptParam = searchParams.get('conceptId');
 
-  const [level, setLevel] = useState<MapLevel>(
-    initialSubjectMeta ? (initialIsEnglish ? 'english' : 'chapter') : 'subject',
-  );
-  const [selectedSubject, setSelectedSubject] = useState<string | null>(
-    initialSubjectMeta ? initialSubjectMeta.key : null,
-  );
-  const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
-  const [breadcrumb, setBreadcrumb] = useState<BreadcrumbEntry[]>(
-    initialSubjectMeta
-      ? [{
-          level: 'subject',
-          label: initialIsEnglish ? 'English' : initialSubjectMeta.label,
-          key: initialSubjectMeta.key,
-        }]
-      : [],
-  );
-  const [selectedConcept, setSelectedConcept] = useState<Concept | null>(null);
-  const [animKey, setAnimKey] = useState(0);
-  const [showPanel, setShowPanel] = useState(false);
+  const selectedSubject = subjectParam;
+  const selectedChapter = chapterParam;
+  const showPanel = Boolean(conceptParam);
+  const level: MapLevel =
+    !subjectParam ? 'subject'
+      : subjectParam === 'english' && !chapterParam ? 'english'
+        : !chapterParam ? 'chapter'
+          : 'concept';
+
+  // Data loaded from the URL params.
   const [chapters, setChapters] = useState<ApiChapter[]>([]);
+  const [selectedConcept, setSelectedConcept] = useState<Concept | null>(null);
+
+  // Layer key — also used to re-trigger the orbit zoom animation on each change.
+  const navKey = `${subjectParam ?? ''}|${chapterParam ?? ''}`;
+
+  // Breadcrumb trail derived from the current subject/chapter.
+  const breadcrumb = useMemo<BreadcrumbEntry[]>(() => {
+    const crumbs: BreadcrumbEntry[] = [];
+    if (!selectedSubject) return crumbs;
+    if (selectedSubject === 'english') {
+      crumbs.push({ level: 'subject', label: 'English', key: 'english' });
+    } else if (selectedSubject.startsWith('english_')) {
+      crumbs.push({ level: 'subject', label: 'English', key: 'english' });
+      const track = ENGLISH_TRACKS.find(t => ENGLISH_TRACK_SUBJECT[t.key] === selectedSubject);
+      crumbs.push({ level: 'chapter', label: track?.label ?? subjectDisplay(selectedSubject).label, key: selectedSubject });
+    } else {
+      crumbs.push({ level: 'subject', label: subjectDisplay(selectedSubject).label, key: selectedSubject });
+    }
+    if (selectedChapter) {
+      const name = chapters.find(c => c.id === selectedChapter)?.name ?? 'Chapter';
+      crumbs.push({ level: 'chapter', label: name, key: selectedChapter });
+    }
+    return crumbs;
+  }, [selectedSubject, selectedChapter, chapters]);
 
   // Live Today's-Fix / Revise queue counts for the bottom CTAs.
   const [queueCounts, setQueueCounts] = useState<{ fix: number; revise: number }>({ fix: 0, revise: 0 });
@@ -123,121 +137,94 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
   // overlap. Scale the nodes down on narrow screens to restore spacing.
   const nodeScale = isNarrow ? 0.6 : 1;
 
-  function zoomToSubject(subjectKey: string, subjectLabel: string) {
-    if (subjectKey === 'english') {
-      setLevel('english');
-      setSelectedSubject('english');
-      setBreadcrumb([{ level: 'subject', label: 'English', key: 'english' }]);
-      setAnimKey(k => k + 1);
-    } else {
-      setChapters([]); // clear while loading
-      setLevel('chapter');
-      setSelectedSubject(subjectKey);
-      setBreadcrumb([{ level: 'subject', label: subjectLabel, key: subjectKey }]);
-      setAnimKey(k => k + 1);
-      fetchChapters(subjectKey)
-        .then(data => setChapters(data))
-        .catch(() => setChapters([]));
-    }
+  // ── Navigation: every drill-down pushes a URL ───────────────────────────
+  function buildMapUrl(subject?: string | null, chapter?: string | null, conceptId?: string | null) {
+    const sp = new URLSearchParams();
+    if (subject) sp.set('subject', subject);
+    if (chapter) sp.set('chapter', chapter);
+    if (conceptId) sp.set('conceptId', conceptId);
+    const qs = sp.toString();
+    return qs ? `/brain-map?${qs}` : '/brain-map';
   }
 
+  function zoomToSubject(subjectKey: string) {
+    router.push(buildMapUrl(subjectKey));
+  }
   // English track (Vocabulary, Grammar, …) → its chapters. Each track is its
   // own DB subject_key (english_vocab, english_grammar, …).
-  function zoomToEnglishTrack(trackSubjectKey: string, trackLabel: string) {
-    setChapters([]); // clear while loading
-    setLevel('chapter');
-    setSelectedSubject(trackSubjectKey);
-    setBreadcrumb([
-      { level: 'subject', label: 'English', key: 'english' },
-      { level: 'chapter', label: trackLabel, key: trackSubjectKey },
-    ]);
-    setAnimKey(k => k + 1);
-    fetchChapters(trackSubjectKey)
-      .then(data => setChapters(data))
-      .catch(() => setChapters([]));
+  function zoomToEnglishTrack(trackSubjectKey: string) {
+    router.push(buildMapUrl(trackSubjectKey));
   }
-
-  function zoomToChapter(chapterId: string, chapterName: string) {
-    setLevel('concept');
-    setSelectedChapter(chapterId);
-    setBreadcrumb(bc => [...bc, { level: 'chapter', label: chapterName, key: chapterId }]);
-    setAnimKey(k => k + 1);
+  function zoomToChapter(chapterId: string) {
+    router.push(buildMapUrl(selectedSubject, chapterId));
   }
-
-  function goBack() {
-    if (level === 'concept') {
-      setLevel('chapter');
-      setSelectedChapter(null);
-      setBreadcrumb(bc => bc.slice(0, -1));
-    } else if (level === 'chapter' && selectedSubject?.startsWith('english_')) {
-      // English track's chapter view → back to the English track list
-      setLevel('english');
-      setSelectedSubject('english');
-      setBreadcrumb([{ level: 'subject', label: 'English', key: 'english' }]);
-    } else {
-      setLevel('subject');
-      setSelectedSubject(null);
-      setBreadcrumb([]);
-    }
-    setAnimKey(k => k + 1);
-    setShowPanel(false);
-    setSelectedConcept(null);
-  }
-
   function openConcept(concept: Concept) {
-    setSelectedConcept(concept);
-    setShowPanel(true);
+    router.push(buildMapUrl(selectedSubject, selectedChapter, concept.id));
+  }
+  // In-app back mirrors the native/phone back button.
+  function goBack() {
+    router.back();
+  }
+  // URL for a breadcrumb crumb, so users can jump straight to a level.
+  function crumbUrl(b: BreadcrumbEntry): string {
+    if (b.level === 'subject') return buildMapUrl(b.key);
+    if (b.key.startsWith('english_')) return buildMapUrl(b.key); // a track is its own subject
+    return buildMapUrl(selectedSubject, b.key);
   }
 
-  // Restore the subject → chapter → concept path when arriving with ?conceptId=
-  // (e.g. returning from a question session). Runs once on mount.
+  // Load the subject's chapters whenever the subject changes. English itself has
+  // no chapters (it shows its track picker), but each english_<track> does.
   useEffect(() => {
-    const conceptId = searchParams.get('conceptId');
-    if (!conceptId) {
-      // ?subject=<key> deep-link: initial level/subject/breadcrumb are seeded
-      // from the URL via lazy state above; here we just load its chapters.
-      if (initialSubjectMeta && !initialIsEnglish) {
-        fetchChapters(initialSubjectMeta.key)
-          .then(data => setChapters(data))
-          .catch(() => setChapters([]));
-      }
-      return;
-    }
-
-    function restore(subjectKey: string, chapterId: string, chapterLabel: string, concept: Concept) {
-      const subjectMeta = SUBJECTS.find(s => s.key === subjectKey);
-      setSelectedSubject(subjectKey);
-      setSelectedChapter(chapterId);
-      setLevel('concept');
-      setBreadcrumb([
-        { level: 'subject', label: subjectMeta?.label ?? subjectKey, key: subjectKey },
-        { level: 'chapter', label: chapterLabel, key: chapterId },
-      ]);
-      setSelectedConcept(concept);
-      setShowPanel(true);
-      setAnimKey(k => k + 1);
-    }
-
-    // 1. Dummy demo concept — restore directly from local data
-    const loc = CONCEPT_BY_ID[conceptId];
-    if (loc) {
-      restore(loc.subjectKey, loc.chapterId, loc.chapterId, loc);
-      return;
-    }
-
-    // 2. Real DB concept — fetch its details so we land on the right chapter
     let cancelled = false;
-    fetchConcept(conceptId)
-      .then(c => {
-        if (cancelled) return;
-        // Load the chapter's siblings so the orbit renders, then open the panel
-        fetchChapters(c.subjectKey).then(chs => { if (!cancelled) setChapters(chs); }).catch(() => {});
-        restore(c.subjectKey, c.chapterId, c.chapterName, apiDetailToConcept(c));
-      })
-      .catch(() => {}); // unknown concept — stay on the subject view
+    (async () => {
+      if (!selectedSubject || selectedSubject === 'english') {
+        if (!cancelled) setChapters([]);
+        return;
+      }
+      if (!cancelled) setChapters([]);
+      try {
+        const data = await fetchChapters(selectedSubject);
+        if (!cancelled) setChapters(data);
+      } catch {
+        if (!cancelled) setChapters([]);
+      }
+    })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedSubject]);
+
+  // Resolve the concept object for the open panel from its id in the URL.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!conceptParam) { if (!cancelled) setSelectedConcept(null); return; }
+      const loc = CONCEPT_BY_ID[conceptParam];
+      if (loc) { if (!cancelled) setSelectedConcept(loc); return; }
+      try {
+        const c = await fetchConcept(conceptParam);
+        if (!cancelled) setSelectedConcept(apiDetailToConcept(c));
+      } catch {
+        // unknown concept — leave the panel without details
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [conceptParam]);
+
+  // A bare ?conceptId= deep-link (e.g. returning from a session) carries no
+  // subject/chapter. Canonicalise the URL so the concept orbit beneath the panel
+  // renders and back/forward behave. router.replace keeps it out of history.
+  useEffect(() => {
+    if (!conceptParam || (subjectParam && chapterParam)) return;
+    const loc = CONCEPT_BY_ID[conceptParam];
+    if (loc) {
+      router.replace(buildMapUrl(loc.subjectKey, loc.chapterId, conceptParam));
+      return;
+    }
+    let cancelled = false;
+    fetchConcept(conceptParam)
+      .then(c => { if (!cancelled) router.replace(buildMapUrl(c.subjectKey, c.chapterId, conceptParam)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [conceptParam, subjectParam, chapterParam, router]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full overflow-hidden" style={{ background: 'transparent' }}>
@@ -261,8 +248,19 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
           >
             ← back
           </button>
-          <div className="text-xs font-semibold" style={{ color: '#78716c' }}>
-            Brain {breadcrumb.map(b => `› ${b.label}`).join(' ')}
+          <div className="text-xs font-semibold flex items-center flex-wrap gap-x-1" style={{ color: '#78716c' }}>
+            <button onClick={() => router.push('/brain-map')} className="hover:underline">Brain</button>
+            {breadcrumb.map((b, i) => {
+              const isLast = i === breadcrumb.length - 1;
+              return (
+                <span key={`${b.key}-${i}`} className="flex items-center gap-x-1">
+                  <span>›</span>
+                  {isLast
+                    ? <span style={{ color: '#44403c' }}>{b.label}</span>
+                    : <button onClick={() => router.push(crumbUrl(b))} className="hover:underline">{b.label}</button>}
+                </span>
+              );
+            })}
           </div>
         </div>
       )}
@@ -282,7 +280,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
       {/* SVG layer — connection lines + orbit rings */}
       <svg
-        key={`svg-${animKey}`}
+        key={`svg-${navKey}`}
         className="absolute inset-0 pointer-events-none animate-fade-in"
         width="100%" height="100%"
         style={{ overflow: 'visible' }}
@@ -356,7 +354,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
       {/* Center node */}
       <CenterNode
-        key={`center-${animKey}`}
+        key={`center-${navKey}`}
         level={level}
         cx={orbitCx}
         cy={cy}
@@ -366,7 +364,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       {/* Orbital nodes */}
       {level === 'subject' && (
         <SubjectNodes
-          key={`subj-${animKey}`}
+          key={`subj-${navKey}`}
           cx={orbitCx} cy={cy} r={rSubject} scale={nodeScale}
           onSelect={zoomToSubject}
         />
@@ -374,7 +372,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
       {level === 'chapter' && selectedSubject && (
         <ChapterNodes
-          key={`chap-${animKey}`}
+          key={`chap-${navKey}`}
           cx={orbitCx} cy={cy} r={rChapter} scale={nodeScale}
           chapters={chapters}
           subjectColor={subjectDisplay(selectedSubject).color}
@@ -384,7 +382,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
       {level === 'concept' && selectedChapter && (
         <ConceptNodes
-          key={`conc-${animKey}`}
+          key={`conc-${navKey}`}
           cx={orbitCx} cy={cy} r={rConcept} scale={nodeScale}
           chapterId={selectedChapter}
           onSelect={openConcept}
@@ -393,7 +391,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
 
       {level === 'english' && (
         <EnglishTracks
-          key={`eng-${animKey}`}
+          key={`eng-${navKey}`}
           cx={orbitCx} cy={cy} r={rEnglish} scale={nodeScale}
           onSelect={zoomToEnglishTrack}
         />
@@ -435,7 +433,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
             chapterName={chapterName}
             subjectName={sd.label}
             subjectColor={sd.color}
-            onClose={() => { setShowPanel(false); setSelectedConcept(null); }}
+            onClose={() => router.push(buildMapUrl(selectedSubject, selectedChapter))}
             onStartSharpen={() => router.push(assessmentHref(
               '/sharpen',
               { conceptId: selectedConcept.id },
