@@ -6,6 +6,7 @@ import (
 	"time"
 
 	authmw "github.com/ani1238/brainmaps-api/internal/api/middleware"
+	"github.com/ani1238/brainmaps-api/internal/cache"
 	"github.com/ani1238/brainmaps-api/internal/db"
 )
 
@@ -80,6 +81,19 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+
+	// Cache-aside: dashboard aggregates are read-heavy and hit Neon (billed per
+	// compute-second). Short TTL bounds staleness after a session completes.
+	cacheKey := "dash:" + studentID
+	if cache.Enabled() {
+		var cached DashboardResp
+		if cache.GetJSON(ctx, cacheKey, &cached) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Cache", "HIT")
+			json.NewEncoder(w).Encode(cached)
+			return
+		}
+	}
 
 	resp := DashboardResp{
 		Subjects:       []SubjectRollup{},
@@ -235,6 +249,8 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 		naRows.Close()
 	}
 
+	cache.SetJSON(ctx, cacheKey, resp, 30*time.Second)
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Cache", "MISS")
 	json.NewEncoder(w).Encode(resp)
 }
