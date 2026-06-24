@@ -118,10 +118,42 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 
 	upcomingReviseQueue := scanProgressRowsWithLastDone(upcomingRows, studentID)
 
+	// Recently done: the last few completed levels/stations, newest first. Powers
+	// the "Recently done" feed on the Today view so a kid can see what they just
+	// finished. passed mirrors CompleteSession's immediate threshold (score ≥ 0.60).
+	recentRows, err := db.Pool.Query(r.Context(), `
+		SELECT s.concept_id, c.name, c.subject_key, s.station, s.score, s.completed_at
+		FROM sessions s
+		JOIN concepts c ON c.id = s.concept_id
+		WHERE s.student_id = $1
+		  AND s.completed_at IS NOT NULL
+		ORDER BY s.completed_at DESC
+		LIMIT 6
+	`, studentID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer recentRows.Close()
+
+	recentSessions := []models.RecentSession{} // non-nil so JSON encodes [] not null
+	for recentRows.Next() {
+		var rs models.RecentSession
+		if err := recentRows.Scan(
+			&rs.ConceptID, &rs.ConceptName, &rs.SubjectKey,
+			&rs.Station, &rs.Score, &rs.CompletedAt,
+		); err != nil {
+			continue
+		}
+		rs.Passed = rs.Score >= 0.60
+		recentSessions = append(recentSessions, rs)
+	}
+
 	resp := models.TodayResp{
 		FixQueue:            fixQueue,
 		ReviseQueue:         reviseQueue,
 		UpcomingReviseQueue: upcomingReviseQueue,
+		RecentSessions:      recentSessions,
 	}
 	// Today's Fix/Revise queues are action-sensitive (a just-passed level should
 	// drop out quickly), so keep this TTL short.

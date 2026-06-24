@@ -255,4 +255,17 @@ type TodayResp struct {
 	FixQueue            []ConceptWithProgress `json:"fixQueue"`
 	ReviseQueue         []ConceptWithProgress `json:"reviseQueue"`
 	UpcomingReviseQueue []ConceptWithProgress `json:"upcomingReviseQueue"`
+	RecentSessions      []RecentSession       `json:"recentSessions"`
+}
+
+// RecentSession is a lightweight summary of a just-completed level/station,
+// used for the "Recently done" feed on the Today view.
+type RecentSession struct {
+	ConceptID   string    `json:"conceptId"`
+	ConceptName string    `json:"conceptName"`
+	SubjectKey  string    `json:"subjectKey"`
+	Station     string    `json:"station"`
+	Score       float64   `json:"score"`
+	Passed      bool      `json:"passed"`
+	CompletedAt time.Time `json:"completedAt"`
 }
