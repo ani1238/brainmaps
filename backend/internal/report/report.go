@@ -38,17 +38,59 @@ type FocusArea struct {
 	Tags    []string `json:"tags"`
 }
 
+// Highlight is "a real win this week" — a concept the learner did well on.
+type Highlight struct {
+	Concept   string `json:"concept"`
+	AllLevels bool   `json:"allLevels"`
+	Detail    string `json:"detail"` // AI prose
+}
+
+// Gap is "one thing to look at" — the concept to nudge, in plain language.
+type Gap struct {
+	Concept     string `json:"concept"`
+	Explanation string `json:"explanation"` // AI prose
+}
+
+// StudentVoice is the signature section: the learner's own answer, verbatim,
+// with an AI note on what's missing.
+type StudentVoice struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+	Note     string `json:"note"` // AI prose
+}
+
+// AskTonight is one conversation starter for the parent.
+type AskTonight struct {
+	Question string `json:"question"` // AI prose
+	Hint     string `json:"hint"`     // AI prose
+}
+
+// Trend contrasts recall (knowing) with application (using).
+type Trend struct {
+	RecallPct int    `json:"recallPct"`
+	ApplyPct  int    `json:"applyPct"`
+	Caption   string `json:"caption"` // AI prose
+}
+
 // Report is the cached parent-report payload.
 type Report struct {
-	StudentName string      `json:"studentName"`
-	WeekStart   string      `json:"weekStart"`
-	WeekEnd     string      `json:"weekEnd"`
-	Narrative   string      `json:"narrative"`
-	Suggestion  string      `json:"suggestion"`
-	Effort      Effort      `json:"effort"`
-	Mastery     Mastery     `json:"mastery"`
-	Improving   []Improving `json:"improving"`
-	FocusAreas  []FocusArea `json:"focusAreas"`
+	StudentName  string        `json:"studentName"`
+	WeekStart    string        `json:"weekStart"`
+	WeekEnd      string        `json:"weekEnd"`
+	WeekNumber   int           `json:"weekNumber"`
+	FocusSubject string        `json:"focusSubject"`
+	Headline     string        `json:"headline"`
+	Narrative    string        `json:"narrative"`
+	Suggestion   string        `json:"suggestion"`
+	Win          *Highlight    `json:"win,omitempty"`
+	Gap          *Gap          `json:"gap,omitempty"`
+	Voice        *StudentVoice `json:"voice,omitempty"`
+	AskTonight   *AskTonight   `json:"askTonight,omitempty"`
+	Trend        *Trend        `json:"trend,omitempty"`
+	Effort       Effort        `json:"effort"`
+	Mastery      Mastery       `json:"mastery"`
+	Improving    []Improving   `json:"improving"`
+	FocusAreas   []FocusArea   `json:"focusAreas"`
 }
 
 // Generate builds a fresh report for the given student from the last 7 days.
@@ -161,69 +203,256 @@ func Generate(ctx context.Context, studentID string) (Report, error) {
 		fbRows.Close()
 	}
 
-	// ── AI narrative + suggestion ────────────────────────────────────────────
-	narrative, suggestion := generateNarrative(ctx, rep, feedback)
-	rep.Narrative = narrative
-	rep.Suggestion = suggestion
+	// ── Week number + this week's focus subject ──────────────────────────────
+	db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(CEIL(EXTRACT(epoch FROM now() - MIN(started_at)) / 604800.0), 1)
+		FROM sessions WHERE student_id = $1
+	`, studentID).Scan(&rep.WeekNumber)
+	if rep.WeekNumber < 1 {
+		rep.WeekNumber = 1
+	}
+	var focusSubjectKey string
+	db.Pool.QueryRow(ctx, `
+		SELECT c.subject_key
+		FROM sessions s JOIN concepts c ON c.id = s.concept_id
+		WHERE s.student_id = $1 AND s.started_at >= now() - interval '7 days'
+		GROUP BY c.subject_key ORDER BY COUNT(*) DESC LIMIT 1
+	`, studentID).Scan(&focusSubjectKey)
+	rep.FocusSubject = subjectLabel(focusSubjectKey)
+
+	// ── A real win this week (high score, ideally STRONG + all levels) ───────
+	var win Highlight
+	var winState, l1, l2, l3 string
+	if db.Pool.QueryRow(ctx, `
+		SELECT c.name, COALESCE(cp.state,''), COALESCE(cp.l1_state,''), COALESCE(cp.l2_state,''), COALESCE(cp.l3_state,'')
+		FROM sessions s JOIN concepts c ON c.id = s.concept_id
+		LEFT JOIN concept_progress cp ON cp.student_id = s.student_id AND cp.concept_id = s.concept_id
+		WHERE s.student_id = $1 AND s.completed_at >= now() - interval '7 days' AND s.score >= 0.75
+		ORDER BY (COALESCE(cp.state,'') = 'STRONG') DESC, s.score DESC, s.completed_at DESC
+		LIMIT 1
+	`, studentID).Scan(&win.Concept, &winState, &l1, &l2, &l3) == nil && win.Concept != "" {
+		win.AllLevels = l1 == "done" && l2 == "done" && l3 == "done"
+		rep.Win = &win
+	}
+
+	// ── The gap concept (top active weak area) ───────────────────────────────
+	gapConcept := ""
+	if len(rep.FocusAreas) > 0 {
+		gapConcept = rep.FocusAreas[0].Concept
+	}
+
+	// ── Student's own words: a real answer that shows the gap ────────────────
+	var voice StudentVoice
+	var voiceFeedback string
+	voiceQ := `
+		SELECT q.text, sa.student_text, COALESCE(sa.ai_feedback, '')
+		FROM session_answers sa
+		JOIN sessions s ON s.id = sa.session_id
+		JOIN questions q ON q.id = sa.question_id
+		JOIN concepts c ON c.id = s.concept_id
+		WHERE s.student_id = $1
+		  AND sa.student_text IS NOT NULL AND sa.student_text <> ''
+		  AND sa.ai_score IS NOT NULL
+		  AND ($2 = '' OR c.name = $2)
+		ORDER BY (sa.ai_score < 0.8) DESC, sa.answered_at DESC
+		LIMIT 1`
+	if db.Pool.QueryRow(ctx, voiceQ, studentID, gapConcept).Scan(&voice.Question, &voice.Answer, &voiceFeedback) != nil && gapConcept != "" {
+		db.Pool.QueryRow(ctx, voiceQ, studentID, "").Scan(&voice.Question, &voice.Answer, &voiceFeedback)
+	}
+	haveVoice := voice.Answer != ""
+
+	// ── Recall (knowing) vs application (using), last 30 days ────────────────
+	var recallPct, applyPct *int
+	db.Pool.QueryRow(ctx, `
+		SELECT
+		  round(100.0 * avg(CASE WHEN sa.question_type IN ('MCQ','STORY_MCQ') THEN sa.is_correct::int END))::int,
+		  round(100.0 * avg(CASE WHEN sa.question_type NOT IN ('MCQ','STORY_MCQ','HOTS_MCQ','ASSERTION_REASON') AND sa.ai_score IS NOT NULL THEN sa.ai_score END))::int
+		FROM session_answers sa JOIN sessions s ON s.id = sa.session_id
+		WHERE s.student_id = $1 AND sa.answered_at >= now() - interval '30 days'
+	`, studentID).Scan(&recallPct, &applyPct)
+
+	// ── One structured AI pass fills all the prose ───────────────────────────
+	note := generateNote(ctx, rep, feedback, noteInputs{
+		gapConcept:    gapConcept,
+		win:           rep.Win,
+		voiceQuestion: voice.Question,
+		voiceAnswer:   voice.Answer,
+		voiceFeedback: voiceFeedback,
+		recallPct:     recallPct,
+		applyPct:      applyPct,
+	})
+
+	rep.Headline = note.Headline
+	rep.Narrative = note.Narrative
+	rep.Suggestion = note.Suggestion
+	if rep.Win != nil {
+		rep.Win.Detail = note.WinDetail
+	}
+	if gapConcept != "" {
+		rep.Gap = &Gap{Concept: gapConcept, Explanation: note.GapExplanation}
+	}
+	if haveVoice {
+		voice.Note = note.VoiceNote
+		rep.Voice = &voice
+	}
+	if strings.TrimSpace(note.TonightQuestion) != "" {
+		rep.AskTonight = &AskTonight{Question: note.TonightQuestion, Hint: note.TonightHint}
+	}
+	if recallPct != nil && applyPct != nil {
+		rep.Trend = &Trend{RecallPct: *recallPct, ApplyPct: *applyPct, Caption: note.TrendCaption}
+	}
 	return rep, nil
 }
 
-func generateNarrative(ctx context.Context, rep Report, feedback []string) (string, string) {
+type noteInputs struct {
+	gapConcept    string
+	win           *Highlight
+	voiceQuestion string
+	voiceAnswer   string
+	voiceFeedback string
+	recallPct     *int
+	applyPct      *int
+}
+
+type noteOutput struct {
+	Headline        string `json:"headline"`
+	Narrative       string `json:"narrative"`
+	Suggestion      string `json:"suggestion"`
+	WinDetail       string `json:"winDetail"`
+	GapExplanation  string `json:"gapExplanation"`
+	VoiceNote       string `json:"voiceNote"`
+	TonightQuestion string `json:"tonightQuestion"`
+	TonightHint     string `json:"tonightHint"`
+	TrendCaption    string `json:"trendCaption"`
+}
+
+// generateNote runs a single AI pass that fills every prose field of the report
+// from real, grounded data. Concept names, the verbatim quote and the recall vs
+// apply numbers are computed in Go and only described by the AI, so nothing is
+// invented. Falls back to deterministic text for narrative + suggestion.
+func generateNote(ctx context.Context, rep Report, feedback []string, in noteInputs) noteOutput {
 	name := rep.StudentName
 	if name == "" {
 		name = "your child"
 	}
 	var sb strings.Builder
 	sb.WriteString("You write a warm weekly progress note for the PARENT of an Indian Class 6 student, for an app called BrainMaps.\n")
-	sb.WriteString("Tone: encouraging and effort-first. Celebrate effort and progress. Be honest but kind about what to work on.\n\n")
+	sb.WriteString("Tone: warm, calm, encouraging and effort-first — like a thoughtful teacher's note. Be honest but never alarming. Plain language a parent understands; no jargon, no raw scores or percentages.\n\n")
 	sb.WriteString(fmt.Sprintf("Student first name: %s\n", name))
-	sb.WriteString(fmt.Sprintf("This week: %d practice sessions across %d active days; current streak %d days.\n", rep.Effort.Sessions, rep.Effort.ActiveDays, rep.Effort.Streak))
-	sb.WriteString(fmt.Sprintf("Mastery so far: %d strong, %d getting there, %d still to work on (of %d concepts practised).\n", rep.Mastery.Strong, rep.Mastery.Developing, rep.Mastery.Weak, rep.Mastery.Total))
-	if len(rep.Improving) > 0 {
-		names := make([]string, 0, len(rep.Improving))
-		for _, im := range rep.Improving {
-			names = append(names, im.Name)
-		}
-		sb.WriteString("Getting stronger on: " + strings.Join(names, ", ") + ".\n")
+	if rep.FocusSubject != "" {
+		sb.WriteString("This week's focus subject: " + rep.FocusSubject + ".\n")
 	}
-	if len(rep.FocusAreas) > 0 {
-		names := make([]string, 0, len(rep.FocusAreas))
-		for _, fa := range rep.FocusAreas {
-			names = append(names, fa.Concept)
+	sb.WriteString(fmt.Sprintf("Effort this week: %d practice sessions across %d active days; streak %d days.\n", rep.Effort.Sessions, rep.Effort.ActiveDays, rep.Effort.Streak))
+	if in.win != nil {
+		extra := ""
+		if in.win.AllLevels {
+			extra = " (cleared all three levels)"
 		}
-		sb.WriteString("Still working on: " + strings.Join(names, ", ") + ".\n")
+		sb.WriteString("A real win this week — did well on the concept: \"" + in.win.Concept + "\"" + extra + ".\n")
+	}
+	if in.gapConcept != "" {
+		sb.WriteString("The one thing to look at (the gap to nudge): the concept \"" + in.gapConcept + "\".\n")
+	}
+	if in.voiceAnswer != "" {
+		sb.WriteString("\nThe child's OWN answer to a recent question (verbatim — do NOT quote it back, the parent already sees it):\n")
+		if in.voiceQuestion != "" {
+			sb.WriteString("Question asked: " + trimTo(in.voiceQuestion, 240) + "\n")
+		}
+		sb.WriteString("Child's answer: " + trimTo(in.voiceAnswer, 400) + "\n")
+		if in.voiceFeedback != "" {
+			sb.WriteString("Our grader's note on it: " + trimTo(in.voiceFeedback, 300) + "\n")
+		}
+	}
+	if in.recallPct != nil && in.applyPct != nil {
+		sb.WriteString(fmt.Sprintf("\nSkill split: remembering facts %d/100, applying ideas to new situations %d/100.\n", *in.recallPct, *in.applyPct))
 	}
 	if len(feedback) > 0 {
-		sb.WriteString("\nExamples of this week's per-answer feedback (for your context, do not quote verbatim):\n")
+		sb.WriteString("\nMore per-answer feedback for context (do not quote verbatim):\n")
 		for i, f := range feedback {
-			if i >= 6 {
+			if i >= 5 {
 				break
 			}
 			sb.WriteString("- " + f + "\n")
 		}
 	}
-	sb.WriteString("\nWrite JSON ONLY: {\"narrative\":\"...\",\"suggestion\":\"...\"}.\n")
-	sb.WriteString("narrative: 2-3 short sentences to the parent. Address the child by first name. No raw scores or percentages. No bullet points.\n")
-	sb.WriteString("suggestion: ONE short, concrete action the parent can take this week (e.g. encourage a specific concept, 10 minutes of Today's Fix). One sentence.\n")
 	if rep.Effort.Sessions == 0 {
-		sb.WriteString("NOTE: the child has not practised this week — gently encourage starting a short session, stay positive.\n")
+		sb.WriteString("\nNOTE: the child has not practised this week — gently encourage starting one short session; stay positive.\n")
 	}
 
+	sb.WriteString("\nReturn JSON ONLY with these keys (omit a key only if you truly have nothing for it):\n")
+	sb.WriteString("{\"headline\":\"...\",\"narrative\":\"...\",\"suggestion\":\"...\",\"winDetail\":\"...\",\"gapExplanation\":\"...\",\"voiceNote\":\"...\",\"tonightQuestion\":\"...\",\"tonightHint\":\"...\",\"trendCaption\":\"...\"}\n")
+	sb.WriteString("headline: ONE warm sentence summarising the week for " + name + ", e.g. how far they've come on a concept. No scores.\n")
+	sb.WriteString("narrative: 2-3 short sentences to the parent, first name, no scores, no bullets.\n")
+	sb.WriteString("suggestion: ONE concrete thing the parent can do this week to help (specific, kind, doable at home).\n")
+	if in.win != nil {
+		sb.WriteString("winDetail: 1-2 sentences celebrating the win concept above; mention if they cleared all levels.\n")
+	}
+	if in.gapConcept != "" {
+		sb.WriteString("gapExplanation: 1-2 plain-language sentences on what hasn't clicked yet about the gap concept — what the child is mixing up or missing. No jargon.\n")
+	}
+	if in.voiceAnswer != "" {
+		sb.WriteString("voiceNote: 1-2 sentences pointing kindly at what's missing or skipped in the child's own answer above, so the parent sees the gap.\n")
+		sb.WriteString("tonightQuestion: ONE simple, friendly question the parent can ask the child tonight to gently probe/strengthen that gap.\n")
+		sb.WriteString("tonightHint: ONE sentence telling the parent the answer to nudge toward.\n")
+	}
+	if in.recallPct != nil && in.applyPct != nil {
+		sb.WriteString("trendCaption: ONE sentence comparing how the child is doing on remembering vs applying (use qualitatively, do not quote the numbers).\n")
+	}
+
+	out := noteOutput{}
 	text, err := ai.Complete(ctx, sb.String())
-	if err != nil {
-		return fallbackNarrative(rep), fallbackSuggestion(rep)
+	if err == nil {
+		_ = json.Unmarshal([]byte(text), &out)
 	}
-	var parsed struct {
-		Narrative  string `json:"narrative"`
-		Suggestion string `json:"suggestion"`
+	if strings.TrimSpace(out.Narrative) == "" {
+		out.Narrative = fallbackNarrative(rep)
 	}
-	if err := json.Unmarshal([]byte(text), &parsed); err != nil || strings.TrimSpace(parsed.Narrative) == "" {
-		return fallbackNarrative(rep), fallbackSuggestion(rep)
+	if strings.TrimSpace(out.Suggestion) == "" {
+		out.Suggestion = fallbackSuggestion(rep)
 	}
-	if strings.TrimSpace(parsed.Suggestion) == "" {
-		parsed.Suggestion = fallbackSuggestion(rep)
+	return out
+}
+
+// subjectLabel maps a DB subject_key to a parent-friendly label.
+func subjectLabel(key string) string {
+	switch key {
+	case "science":
+		return "Science"
+	case "social_science", "soc":
+		return "Social Science"
+	case "maths", "math":
+		return "Maths"
+	case "english_vocab":
+		return "English (Vocabulary)"
+	case "english_grammar":
+		return "English (Grammar)"
+	case "english_rc":
+		return "English (Reading)"
+	case "english_lit":
+		return "English (Literature)"
+	case "english_writing":
+		return "English (Writing)"
+	case "":
+		return ""
+	default:
+		if strings.HasPrefix(key, "english") {
+			return "English"
+		}
+		clean := strings.ReplaceAll(key, "_", " ")
+		if clean == "" {
+			return clean
+		}
+		return strings.ToUpper(clean[:1]) + clean[1:]
 	}
-	return parsed.Narrative, parsed.Suggestion
+}
+
+// trimTo shortens s to at most n characters, adding an ellipsis when cut.
+func trimTo(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // Deterministic fallbacks when the AI provider is unavailable.
