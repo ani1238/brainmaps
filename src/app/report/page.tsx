@@ -149,14 +149,14 @@ export default function ParentReportPage() {
                     The report is for you. Choose a 4–6 digit PIN to keep it private from your child.
                   </p>
                   <form onSubmit={handleCreate} className="flex flex-col gap-3">
-                    <input type="password" inputMode="numeric" placeholder="New PIN" value={pin}
+                    <input type="text" inputMode="numeric" autoComplete="off" name="bm-new-pin" placeholder="New PIN" value={pin}
                       onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       className="px-4 py-3 rounded-xl text-base font-semibold outline-none"
-                      style={{ background: '#fff', border: '1.5px solid rgba(0,0,0,0.12)', color: '#1c1917' }} />
-                    <input type="password" inputMode="numeric" placeholder="Confirm PIN" value={confirmPin}
+                      style={{ background: '#fff', border: '1.5px solid rgba(0,0,0,0.12)', color: '#1c1917', WebkitTextSecurity: 'disc' } as React.CSSProperties} />
+                    <input type="text" inputMode="numeric" autoComplete="off" name="bm-confirm-pin" placeholder="Confirm PIN" value={confirmPin}
                       onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       className="px-4 py-3 rounded-xl text-base font-semibold outline-none"
-                      style={{ background: '#fff', border: '1.5px solid rgba(0,0,0,0.12)', color: '#1c1917' }} />
+                      style={{ background: '#fff', border: '1.5px solid rgba(0,0,0,0.12)', color: '#1c1917', WebkitTextSecurity: 'disc' } as React.CSSProperties} />
                     {error && <p className="text-sm font-semibold" style={{ color: '#dc2626' }}>{error}</p>}
                     <button type="submit" disabled={busy}
                       className="py-3 rounded-xl font-bold text-sm text-white disabled:opacity-50"
@@ -172,10 +172,10 @@ export default function ParentReportPage() {
                   <h1 className="text-xl font-extrabold mb-1" style={{ color: '#1c1917' }}>Parent report</h1>
                   <p className="text-sm mb-6" style={{ color: '#78716c' }}>Enter your parent PIN to continue.</p>
                   <form onSubmit={handleEnter} className="flex flex-col gap-3">
-                    <input type="password" inputMode="numeric" placeholder="PIN" value={pin} autoFocus
+                    <input type="text" inputMode="numeric" autoComplete="off" name="bm-pin" placeholder="PIN" value={pin} autoFocus
                       onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       className="px-4 py-3 rounded-xl text-base font-semibold outline-none"
-                      style={{ background: '#fff', border: '1.5px solid rgba(0,0,0,0.12)', color: '#1c1917' }} />
+                      style={{ background: '#fff', border: '1.5px solid rgba(0,0,0,0.12)', color: '#1c1917', WebkitTextSecurity: 'disc' } as React.CSSProperties} />
                     {error && <p className="text-sm font-semibold" style={{ color: '#dc2626' }}>{error}</p>}
                     <button type="submit" disabled={busy}
                       className="py-3 rounded-xl font-bold text-sm text-white disabled:opacity-50"
