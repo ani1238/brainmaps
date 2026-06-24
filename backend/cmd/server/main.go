@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ani1238/brainmaps-api/internal/api"
+	"github.com/ani1238/brainmaps-api/internal/cache"
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/joho/godotenv"
 )
@@ -27,6 +28,14 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 	defer db.Close()
+
+	// Optional read-cache. Disabled cleanly if REDIS_URL is unset/unreachable.
+	cache.Connect(ctx)
+	if cache.Enabled() {
+		log.Println("cache: Redis connected")
+	} else {
+		log.Println("cache: disabled (no Redis) — serving from Postgres")
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {

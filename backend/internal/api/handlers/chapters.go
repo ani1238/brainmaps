@@ -3,8 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	authmw "github.com/ani1238/brainmaps-api/internal/api/middleware"
+	"github.com/ani1238/brainmaps-api/internal/cache"
 	"github.com/ani1238/brainmaps-api/internal/db"
 )
 
@@ -36,6 +38,18 @@ func GetChapters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	studentID, _ := authmw.StudentForUser(r.Context())
+
+	// Cache-aside per student + subject (chapter mastery markers change slowly).
+	cacheKey := "chapters:" + studentID + ":" + subjectKey
+	if cache.Enabled() {
+		var cached []ChapterResp
+		if cache.GetJSON(r.Context(), cacheKey, &cached) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Cache", "HIT")
+			json.NewEncoder(w).Encode(cached)
+			return
+		}
+	}
 
 	var board string
 	var grade int
@@ -74,6 +88,8 @@ func GetChapters(w http.ResponseWriter, r *http.Request) {
 		chapters = append(chapters, ch)
 	}
 
+	cache.SetJSON(r.Context(), cacheKey, chapters, 30*time.Second)
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Cache", "MISS")
 	json.NewEncoder(w).Encode(chapters)
 }

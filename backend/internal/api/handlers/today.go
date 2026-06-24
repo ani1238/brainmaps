@@ -6,6 +6,7 @@ import (
 	"time"
 
 	authmw "github.com/ani1238/brainmaps-api/internal/api/middleware"
+	"github.com/ani1238/brainmaps-api/internal/cache"
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/models"
 )
@@ -21,6 +22,18 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 	if !authmw.AuthorizeStudent(r, studentID) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
+	}
+
+	// Cache-aside (short TTL bounds staleness after a session changes the queues).
+	cacheKey := "today:" + studentID
+	if cache.Enabled() {
+		var cached models.TodayResp
+		if cache.GetJSON(r.Context(), cacheKey, &cached) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Cache", "HIT")
+			json.NewEncoder(w).Encode(cached)
+			return
+		}
 	}
 
 	// Fix queue: every concept with a station that still needs fixing. A failed
@@ -105,12 +118,15 @@ func GetToday(w http.ResponseWriter, r *http.Request) {
 
 	upcomingReviseQueue := scanProgressRowsWithLastDone(upcomingRows, studentID)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(models.TodayResp{
+	resp := models.TodayResp{
 		FixQueue:            fixQueue,
 		ReviseQueue:         reviseQueue,
 		UpcomingReviseQueue: upcomingReviseQueue,
-	})
+	}
+	cache.SetJSON(r.Context(), cacheKey, resp, 30*time.Second)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Cache", "MISS")
+	json.NewEncoder(w).Encode(resp)
 }
 
 // scanProgressRows scans concept+progress rows.
