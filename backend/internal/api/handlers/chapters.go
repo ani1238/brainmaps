@@ -74,7 +74,7 @@ func GetChapters(w http.ResponseWriter, r *http.Request) {
 		ORDER BY ch.order_idx ASC
 	`, subjectKey, board, grade, studentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	defer rows.Close()

@@ -149,6 +149,7 @@ type authResp struct {
 	Name         string `json:"name"`
 	Grade        int    `json:"grade"`
 	Board        string `json:"board"`
+	Role         string `json:"role,omitempty"`
 }
 
 // normalizeGradeBoard clamps grade to 3..7 (default 6) and board to CBSE/ICSE.
@@ -444,12 +445,13 @@ func Me(w http.ResponseWriter, r *http.Request) {
 
 	var name, board, studentID string
 	var grade int
+	var role string
 	err := db.Pool.QueryRow(r.Context(), `
-		SELECT u.name, u.grade, u.board, s.id
+		SELECT u.name, u.grade, u.board, u.role, s.id
 		FROM users u
 		JOIN students s ON s.user_id = u.id
 		WHERE u.id = $1
-	`, userID).Scan(&name, &grade, &board, &studentID)
+	`, userID).Scan(&name, &grade, &board, &role, &studentID)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -462,5 +464,6 @@ func Me(w http.ResponseWriter, r *http.Request) {
 		Name:      name,
 		Grade:     grade,
 		Board:     board,
+		Role:      role,
 	})
 }

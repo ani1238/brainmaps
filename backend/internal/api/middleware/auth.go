@@ -90,3 +90,29 @@ func bearerToken(r *http.Request) string {
 	}
 	return strings.TrimSpace(v[7:])
 }
+
+// Role returns the authenticated user's role (student | parent | admin) from
+// the database. Returns ("", false) when unauthenticated or on lookup failure.
+func Role(ctx context.Context) (string, bool) {
+	userID, ok := UserID(ctx)
+	if !ok {
+		return "", false
+	}
+	var role string
+	if err := db.Pool.QueryRow(ctx, `SELECT role FROM users WHERE id = $1`, userID).Scan(&role); err != nil {
+		return "", false
+	}
+	return role, true
+}
+
+// RequireAdmin gates a route to admin users only. Must run after RequireAuth.
+func RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role, ok := Role(r.Context())
+		if !ok || role != "admin" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

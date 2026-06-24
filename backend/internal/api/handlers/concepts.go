@@ -54,7 +54,7 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 		ORDER BY c.order_idx
 	`, chapterID, studentID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	defer rows.Close()
@@ -80,7 +80,7 @@ func GetConcepts(w http.ResponseWriter, r *http.Request) {
 			&attempts, &lastAt,
 			&intervalDays, &nextDue, &lastDone,
 		); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			serverErr(w, err)
 			return
 		}
 
@@ -252,14 +252,14 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 		ORDER BY q.id, o.option_key
 	`, conceptID, level)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 	defer rows.Close()
 
 	questions, err := scanQuestionRows(rows, conceptID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		serverErr(w, err)
 		return
 	}
 
