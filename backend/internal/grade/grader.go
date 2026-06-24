@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ani1238/brainmaps-api/internal/ai"
+	"github.com/ani1238/brainmaps-api/internal/cache"
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/models"
 )
@@ -432,6 +433,11 @@ func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 
 	updateWeakConceptLifecycle(ctx, studentID, conceptID, sessionWeakSet(ctx, sessionID, aiWeak), tested)
 	updateStreak(ctx, studentID)
+
+	// Progress just changed — drop this student's cached read aggregates so the
+	// dashboard, today queues and brain-map markers refresh immediately instead
+	// of waiting out the TTL.
+	cache.BustStudent(ctx, studentID)
 }
 
 var recallIntervals = []int{1, 3, 7, 21, 60}

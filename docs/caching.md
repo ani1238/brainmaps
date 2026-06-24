@@ -12,7 +12,7 @@ add/remove a cached path so this stays the single source of truth.
 - **Optional / graceful:** if `REDIS_URL` is unset or Redis is unreachable, the cache disables itself and every request falls through to Postgres. Nothing depends on the cache being up.
 - **Off the hot path:** per-op timeouts default **250 ms** (`REDIS_TIMEOUT_MS` env override); a slow/down cache never delays a response.
 - **Observability:** cached endpoints return an `X-Cache: HIT|MISS` response header.
-- **Invalidation:** currently **TTL-only** (no explicit busting yet). TTLs are tuned per how fast each value changes — see the table.
+- **Invalidation:** **event-based + TTL.** On session completion `recomputeSession` calls `cache.BustStudent(studentID)`, which deletes `dash:<sid>`, `today:<sid>` and `chapters:<sid>:*` so progress shows immediately; the TTLs are the backstop.
 
 ## What is cached right now
 
@@ -29,10 +29,10 @@ add/remove a cached path so this stays the single source of truth.
 - **Resume-an-attempt** — client-side `localStorage` (3h), not server cache.
 
 ## Backlog / ideas
-- [ ] Bust `dash:`, `today:`, `chapters:<sid>:*` for a student on session completion (instant freshness, would let us raise TTLs further). Deferred because it touches in-flight WIP files.
-- [ ] Cache `GET /concepts/{id}` detail (curriculum + progress overlay).
+- [ ] Cache `GET /concepts/{id}` detail (curriculum + progress overlay) and `GET /concepts?chapter=` (the per-station node markers) — would also be busted by `BustStudent`.
 - [ ] Rate-limit / weekly quota for on-demand parent-report generation (the future billing gate) — natural Redis use.
 
 ## Changelog
 - 2026-06-24 — Initial Redis cache: dashboard, today, chapters (30s TTL each). PR #28.
 - 2026-06-24 — Tuned TTLs by change-rate: chapters 10 min, dashboard 3 min, today 60s. PR #30.
+- 2026-06-24 — Event-based invalidation: `BustStudent` on session completion (recomputeSession) clears dash/today/chapters for the student. PR #31.
