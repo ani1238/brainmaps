@@ -409,7 +409,7 @@ function StationTab({ stationKey, status, questions, loading, reviseSchedule, on
             className="w-full py-3 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
             style={{ background: 'rgba(79,70,229,0.08)', color: COLORS.indigo, border: `1px solid ${COLORS.indigo}30` }}
           >
-            📄 Previous reports
+            📄 Show reports
           </button>
         </div>
       ) : (
