@@ -682,7 +682,7 @@ function SharpenContent() {
                     className="px-6 py-3 rounded-xl font-bold text-sm"
                     style={{ background: 'rgba(0,0,0,0.04)', color: '#57534e' }}
                   >
-                    📄 {historyOpen ? 'Hide previous reports' : 'Previous reports'}
+                    📄 {historyOpen ? 'Hide reports' : 'Show reports'}
                   </button>
                   {historyOpen && (
                     <div className="flex flex-col gap-2">
