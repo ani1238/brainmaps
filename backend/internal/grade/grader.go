@@ -494,9 +494,9 @@ func updateReviseSchedule(ctx context.Context, studentID, conceptID string, pass
 	`, studentID, conceptID, next)
 }
 
-// unlockReviseIfEligible opens Revise once Levels 1–3 are done and mastery is
-// strong. Strengthen remains optional, and the first recall is scheduled for
-// the next day.
+// unlockReviseIfEligible opens Revise once Levels 1–3 are done and mastery meets
+// the pass bar (EMA ≥ 0.60, same threshold as clearing a station). Strengthen
+// remains optional, and the first recall is scheduled for the next day.
 func unlockReviseIfEligible(ctx context.Context, studentID, conceptID string) {
 	var unlocked bool
 	err := db.QueryRow(ctx, `
@@ -508,7 +508,7 @@ func unlockReviseIfEligible(ctx context.Context, studentID, conceptID string) {
 		  AND l1_state = 'done'
 		  AND l2_state = 'done'
 		  AND l3_state = 'done'
-		  AND ema_score >= 0.80
+		  AND ema_score >= 0.60
 		RETURNING true
 	`, studentID, conceptID).Scan(&unlocked)
 	if err != nil || !unlocked {
