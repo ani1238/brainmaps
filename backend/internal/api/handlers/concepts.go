@@ -249,7 +249,7 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 		       o.option_key, o.text AS option_text, o.is_correct
 		FROM questions q
 		LEFT JOIN mcq_options o ON o.question_id = q.id
-		WHERE q.concept_id = $1 AND q.level = $2
+		WHERE q.concept_id = $1 AND q.level = $2 AND q.is_active
 		ORDER BY q.id, o.option_key
 	`, conceptID, level)
 	if err != nil {
@@ -464,6 +464,7 @@ func recheckCandidates(ctx context.Context, conceptID string, tags []string) []m
 		FROM questions q
 		LEFT JOIN mcq_options o ON o.question_id = q.id
 		WHERE q.concept_id = $1
+		  AND q.is_active
 		  AND EXISTS (SELECT 1 FROM unnest(q.key_concepts) kc WHERE lower(trim(kc)) = ANY($2))
 		ORDER BY q.id, o.option_key
 	`, conceptID, tags)
