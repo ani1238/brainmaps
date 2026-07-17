@@ -63,6 +63,8 @@ func GetSessionReview(w http.ResponseWriter, r *http.Request) {
 		review.Score = *score
 	}
 
+	kcDescriptions := keyConceptDescriptions(r.Context(), review.ConceptID)
+
 	rows, err := db.Query(r.Context(), `
 		SELECT
 			sa.question_id,
@@ -132,10 +134,7 @@ func GetSessionReview(w http.ResponseWriter, r *http.Request) {
 			answer.CorrectAnswer = strings.ToUpper(correctKey) + ". " + correctText
 		}
 		answer.Explanation = explanation
-		answer.AnswerGuide = rubricHint
-		if answer.AnswerGuide == "" && len(keyConcepts) > 0 {
-			answer.AnswerGuide = "A strong answer includes: " + strings.Join(keyConcepts, "; ")
-		}
+		answer.AnswerGuide = buildAnswerGuide(rubricHint, keyConcepts, kcDescriptions)
 		review.Answers = append(review.Answers, answer)
 	}
 	if err := rows.Err(); err != nil {

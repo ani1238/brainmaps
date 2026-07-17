@@ -137,6 +137,8 @@ func loadSessionReview(ctx context.Context, sessionID string) (models.SessionRev
 		review.Score = *score
 	}
 
+	kcDescriptions := keyConceptDescriptions(ctx, review.ConceptID)
+
 	rows, err := db.Query(ctx, `
 		SELECT
 			sa.question_id,
@@ -204,10 +206,7 @@ func loadSessionReview(ctx context.Context, sessionID string) (models.SessionRev
 			answer.CorrectAnswer = strings.ToUpper(correctKey) + ". " + correctText
 		}
 		answer.Explanation = explanation
-		answer.AnswerGuide = rubricHint
-		if answer.AnswerGuide == "" && len(keyConcepts) > 0 {
-			answer.AnswerGuide = "A strong answer includes: " + strings.Join(keyConcepts, "; ")
-		}
+		answer.AnswerGuide = buildAnswerGuide(rubricHint, keyConcepts, kcDescriptions)
 		review.Answers = append(review.Answers, answer)
 	}
 	if err := rows.Err(); err != nil {
