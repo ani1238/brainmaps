@@ -12,6 +12,7 @@ import (
 	authmw "github.com/ani1238/brainmaps-api/internal/api/middleware"
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/models"
+	"github.com/ani1238/brainmaps-api/internal/qtypes"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 )
@@ -244,7 +245,7 @@ func GetConceptQuestions(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(q.rubric_points, '{}'::text[]),
 		       COALESCE(q.key_points, '{}'::text[]),
 		       q.recall_guide, q.preamble,
-		       q.key_concepts,
+		       q.key_concepts, q.payload,
 		       o.option_key, o.text AS option_text, o.is_correct
 		FROM questions q
 		LEFT JOIN mcq_options o ON o.question_id = q.id
@@ -323,6 +324,11 @@ func activeQuestions(questions []models.Question) []models.ActiveQuestion {
 			RecallGuide: question.RecallGuide,
 			Preamble:    question.Preamble,
 		}
+		if len(question.Payload) > 0 {
+			if safe, err := qtypes.Sanitize(question.Type, question.Payload); err == nil {
+				active.Payload = safe
+			}
+		}
 		for _, option := range question.Options {
 			active.Options = append(active.Options, models.ActiveMCQOption{
 				Key:  option.Key,
@@ -347,12 +353,14 @@ func scanQuestionRows(rows pgx.Rows, conceptID string) ([]models.Question, error
 			rubricPoints, keyPoints   []string
 			recallGuide, preamble     *string
 			keyConcepts               []string
+			payload                   json.RawMessage
 			optKey, optText           *string
 			isCorrect                 *bool
 		)
 		if err := rows.Scan(
 			&qID, &qType, &qLevel, &qText, &explanation, &rubricHint,
 			&rubricPoints, &keyPoints, &recallGuide, &preamble, &keyConcepts,
+			&payload,
 			&optKey, &optText, &isCorrect,
 		); err != nil {
 			return nil, err
@@ -372,6 +380,7 @@ func scanQuestionRows(rows pgx.Rows, conceptID string) ([]models.Question, error
 				RecallGuide:  recallGuide,
 				Preamble:     preamble,
 				KeyConcepts:  keyConcepts,
+				Payload:      payload,
 			}
 			order = append(order, qID)
 		}
@@ -450,7 +459,7 @@ func recheckCandidates(ctx context.Context, conceptID string, tags []string) []m
 		       COALESCE(q.rubric_points, '{}'::text[]),
 		       COALESCE(q.key_points, '{}'::text[]),
 		       q.recall_guide, q.preamble,
-		       q.key_concepts,
+		       q.key_concepts, q.payload,
 		       o.option_key, o.text AS option_text, o.is_correct
 		FROM questions q
 		LEFT JOIN mcq_options o ON o.question_id = q.id

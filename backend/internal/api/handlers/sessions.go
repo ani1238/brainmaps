@@ -2,13 +2,16 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	authmw "github.com/ani1238/brainmaps-api/internal/api/middleware"
 	"github.com/ani1238/brainmaps-api/internal/db"
 	"github.com/ani1238/brainmaps-api/internal/grade"
 	"github.com/ani1238/brainmaps-api/internal/models"
+	"github.com/ani1238/brainmaps-api/internal/qtypes"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -77,12 +80,54 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Insert answers, tally MCQ
+	// Insert answers, tally objective (server-graded) items.
 	mcqCorrect, mcqTotal := 0, 0
 	hasOpenAnswers := false
 
 	for _, ans := range req.Answers {
-		if isOptionQuestion(ans.QuestionType) {
+		// Load the authoritative type + payload. v12 items carry their full
+		// structure (options, categories, pairs, blanks, …) in questions.payload;
+		// legacy items instead have mcq_options rows and an empty payload.
+		var dbType models.QuestionType
+		var payload json.RawMessage
+		db.QueryRow(r.Context(), `
+			SELECT type, payload FROM questions WHERE id = $1
+		`, ans.QuestionID).Scan(&dbType, &payload)
+		if dbType == "" {
+			dbType = ans.QuestionType
+		}
+
+		// v12 objective types: grade deterministically against the payload and
+		// persist the structured answer. Emitted misconception tags are not
+		// stored per-answer; the weak-tag lifecycle derives weakness from each
+		// wrong answer's key_concepts (see grade.sessionWeakSet), so an is_correct
+		// flag is all the lifecycle needs.
+		if hasPayload(payload) && qtypes.IsObjective(dbType) {
+			answerJSON := ans.AnswerPayload
+			if len(answerJSON) == 0 && ans.ChosenOption != nil {
+				// Back-compat: a single-option answer may arrive as chosenOption.
+				answerJSON = json.RawMessage(fmt.Sprintf(`{"optionId":%q}`, *ans.ChosenOption))
+			}
+			if len(answerJSON) == 0 {
+				continue // unanswered
+			}
+			correct, _, graded := qtypes.Grade(dbType, payload, answerJSON)
+			if graded {
+				db.Exec(r.Context(), `
+					INSERT INTO session_answers
+					  (session_id, question_id, question_type, answer_payload, is_correct)
+					VALUES ($1, $2, $3, $4, $5)
+				`, sessionID, ans.QuestionID, dbType, answerJSON, correct)
+				mcqTotal++
+				if correct {
+					mcqCorrect++
+				}
+				continue
+			}
+		}
+
+		// Legacy single-option items graded via the mcq_options table.
+		if !hasPayload(payload) && isOptionQuestion(dbType) {
 			if ans.ChosenOption == nil {
 				continue
 			}
@@ -96,7 +141,7 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 				INSERT INTO session_answers
 				  (session_id, question_id, question_type, chosen_option, is_correct)
 				VALUES ($1, $2, $3, $4, $5)
-			`, sessionID, ans.QuestionID, ans.QuestionType, ans.ChosenOption, correct)
+			`, sessionID, ans.QuestionID, dbType, ans.ChosenOption, correct)
 
 			mcqTotal++
 			if correct {
@@ -105,18 +150,17 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		switch ans.QuestionType {
-		default: // DESCRIPTIVE, FEYNMAN, BLURT, ACTIVE_RECALL, etc.
-			if ans.StudentText == nil || *ans.StudentText == "" {
-				continue
-			}
-			db.Exec(r.Context(), `
-				INSERT INTO session_answers
-				  (session_id, question_id, question_type, student_text)
-				VALUES ($1, $2, $3, $4)
-			`, sessionID, ans.QuestionID, ans.QuestionType, ans.StudentText)
-			hasOpenAnswers = true
+		// Open-production items (DESCRIPTIVE, FEYNMAN, DESIGN_CHALLENGE, …) and
+		// self-rated recall: store the text for async AI grading.
+		if ans.StudentText == nil || *ans.StudentText == "" {
+			continue
 		}
+		db.Exec(r.Context(), `
+			INSERT INTO session_answers
+			  (session_id, question_id, question_type, student_text)
+			VALUES ($1, $2, $3, $4)
+		`, sessionID, ans.QuestionID, dbType, ans.StudentText)
+		hasOpenAnswers = true
 	}
 
 	// Record per-question time-on-task (drives the careless-vs-concept signal in
@@ -148,10 +192,14 @@ func CompleteSession(w http.ResponseWriter, r *http.Request) {
 		// GetSession for the authoritative score and passed flag.
 		go grade.GradeOpenAnswers(sessionID, studentID)
 	} else {
-		// Pure MCQ session: recompute synchronously (fast, no AI call) so the
-		// response reflects the station outcome — a retry that misses its
-		// targeted weak tags must not show as passed even on a high score.
-		grade.RecomputeSession(sessionID, studentID)
+		// Pure objective session: recompute synchronously on THIS request's RLS
+		// transaction (fast, no AI call) so the response reflects the station
+		// outcome — a retry that misses its targeted weak tags must not show as
+		// passed even on a high score. Reusing the request transaction (rather
+		// than acquiring a second connection via RecomputeSession) is required:
+		// the handler already holds a row lock on this sessions row from the
+		// UPDATE above, so a second connection's UPDATE would deadlock.
+		grade.RecomputeSessionCtx(r.Context(), sessionID)
 		passed = passed && stationCleared(r.Context(), sessionID)
 	}
 
@@ -179,4 +227,11 @@ func isOptionQuestion(qType models.QuestionType) bool {
 	default:
 		return false
 	}
+}
+
+// hasPayload reports whether a question row carries a real v12 payload (a
+// non-empty JSON object). Legacy rows default to '{}' and grade via mcq_options.
+func hasPayload(p json.RawMessage) bool {
+	s := strings.TrimSpace(string(p))
+	return s != "" && s != "{}" && s != "null"
 }

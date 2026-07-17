@@ -404,6 +404,7 @@ function SharpenContent() {
       questionType: payload.questionType,
       chosenOption: payload.chosenOption,
       studentText:  payload.studentText,
+      answerPayload: payload.answerPayload,
       elapsedMs,
     });
   }

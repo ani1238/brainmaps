@@ -376,6 +376,7 @@ interface ApiQuestion {
   level: string;
   text: string;
   options?: ApiOption[];
+  payload?: import('@/types').QuestionPayload;
 }
 
 // ─── Mappers ──────────────────────────────────────────────────────────────────
@@ -414,6 +415,7 @@ function mapQuestion(q: ApiQuestion): Question {
       id: o.key,
       text: o.text,
     })),
+    payload: q.payload,
   };
 }
 
@@ -545,6 +547,7 @@ export interface SubmitAnswer {
   questionType: string;
   chosenOption?: string;
   studentText?: string;
+  answerPayload?: unknown;
   elapsedMs?: number;
 }
 

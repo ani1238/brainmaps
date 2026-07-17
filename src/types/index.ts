@@ -14,12 +14,70 @@ export type QuestionType =
   | 'FIX_IT'
   | 'PRODUCE_IT'
   | 'CONTEXT_CLUE'
-  | 'GENERATIVE_PRODUCTION';
+  | 'GENERATIVE_PRODUCTION'
+  // ─── v12 payload-driven types ──────────────────────────────────────────────
+  | 'CONCLUSION_DRAW'
+  | 'CLASSIFY'
+  | 'MATCH'
+  | 'SEQUENCE'
+  | 'CLOZE'
+  | 'TRUE_FALSE_WHY'
+  | 'PREDICT_JUSTIFY'
+  | 'EVIDENCE_HUNT'
+  | 'MCQ_CLUSTER'
+  | 'DESIGN_CHALLENGE';
 
 export interface MCQOption {
   id: string;
   text: string;
   correct?: boolean;
+}
+
+// ─── v12 question payload ────────────────────────────────────────────────────
+// Server-sanitized (answer keys stripped) type-specific structure. Only the
+// fields relevant to a given `type` are present; components read what they need.
+export interface PayloadOption {
+  id: string;
+  text: string;
+}
+
+export interface QuestionPayload {
+  type?: string;
+  prompt?: string;
+  // mcq / assertion_reason / conclusion_draw / context_clue / story_mcq
+  options?: PayloadOption[];
+  assertion_text?: string;
+  reason_text?: string;
+  data_context?: string;
+  scenario?: string;
+  // spot_it
+  statements?: { id: number; speaker?: string; text: string }[];
+  // true_false_why
+  statement?: string;
+  reason_options?: PayloadOption[];
+  // predict_justify
+  prediction_question?: string;
+  prediction_options?: string[];
+  justify_question?: string;
+  justify_options?: PayloadOption[];
+  // classify
+  categories?: string[];
+  items?: { text: string }[];
+  // match (sanitized: lefts + a shuffled pool of rights)
+  lefts?: string[];
+  rights?: string[];
+  // sequence
+  items_scrambled?: string[];
+  // cloze
+  text?: string;
+  blanks?: { id: number | string }[];
+  word_bank?: string[];
+  // mcq_cluster
+  sub_questions?: { id: string; prompt: string; options: PayloadOption[] }[];
+  // evidence_hunt
+  sentence_options?: { id: string; text: string }[];
+  // open-production (design_challenge / descriptive-style) prompts may carry extra prose
+  [key: string]: unknown;
 }
 
 // Which station a question belongs to. Levels 1–3 each hold a MIX of
@@ -32,6 +90,7 @@ export interface Question {
   text: string;
   level?: QuestionLevel;
   options?: MCQOption[];
+  payload?: QuestionPayload;
   explanation?: string;
   rubricHint?: string;
   keyConcepts?: string[];

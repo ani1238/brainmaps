@@ -336,6 +336,17 @@ func RecomputeSession(sessionID, studentID string) {
 	})
 }
 
+// RecomputeSessionCtx runs the recompute on the caller's existing RLS-scoped
+// transaction (carried in ctx via db.WithQuerier), instead of acquiring a second
+// pool connection. A request handler is already inside such a transaction (set by
+// the RLSContext middleware), and it holds a row lock on the sessions row it just
+// updated; calling the connection-acquiring RecomputeSession from there would
+// deadlock on that lock. Background jobs with no request transaction must still
+// use RecomputeSession, which establishes its own student identity.
+func RecomputeSessionCtx(ctx context.Context, sessionID string) {
+	recomputeSession(ctx, sessionID, nil)
+}
+
 // recomputeSession averages MCQ + AI scores and updates concept_progress.
 func recomputeSession(ctx context.Context, sessionID string, aiWeak []string) {
 	var studentID, conceptID, station string
@@ -486,7 +497,7 @@ func updateReviseSchedule(ctx context.Context, studentID, conceptID string, pass
 	db.Exec(ctx, `
 		INSERT INTO revise_schedule
 		  (student_id, concept_id, interval_days, next_due_at, last_done_at)
-		VALUES ($1, $2, $3, now() + ($3 * interval '1 day'), now())
+		VALUES ($1, $2, $3, now() + make_interval(days => $3), now())
 		ON CONFLICT (student_id, concept_id) DO UPDATE
 		  SET interval_days = EXCLUDED.interval_days,
 		      next_due_at = EXCLUDED.next_due_at,
@@ -620,7 +631,7 @@ func sessionTagStats(ctx context.Context, sessionID string) map[string]tagStat {
 	rows, err := db.Query(ctx, `
 		SELECT lower(trim(kc)) AS tag,
 		       COUNT(*) AS total,
-		       COUNT(*) FILTER (WHERE (sa.chosen_option IS NOT NULL AND sa.is_correct)
+		       COUNT(*) FILTER (WHERE ((sa.chosen_option IS NOT NULL OR sa.answer_payload IS NOT NULL) AND sa.is_correct)
 		                           OR (sa.ai_score IS NOT NULL AND sa.ai_score >= 0.6)) AS correct
 		FROM session_answers sa
 		JOIN questions q ON q.id = sa.question_id
@@ -662,7 +673,7 @@ func sessionWeakSet(ctx context.Context, sessionID string, aiWeak []string) map[
 		JOIN questions q ON q.id = sa.question_id
 		WHERE sa.session_id = $1
 		  AND (
-		        (sa.chosen_option IS NOT NULL AND sa.is_correct = false)
+		        ((sa.chosen_option IS NOT NULL OR sa.answer_payload IS NOT NULL) AND sa.is_correct = false)
 		     OR (sa.ai_score IS NOT NULL AND sa.ai_score < 0.6)
 		  )
 	`, sessionID)

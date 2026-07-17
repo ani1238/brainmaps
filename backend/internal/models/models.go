@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // ── Curriculum ────────────────────────────────────────────────────────────────
 
@@ -29,6 +32,18 @@ const (
 	ProduceIt            QuestionType = "PRODUCE_IT"
 	ContextClue          QuestionType = "CONTEXT_CLUE"
 	GenerativeProduction QuestionType = "GENERATIVE_PRODUCTION"
+
+	// v12 payload-driven types (see migration 021 / internal/qtypes).
+	Classify        QuestionType = "CLASSIFY"
+	Match           QuestionType = "MATCH"
+	Sequence        QuestionType = "SEQUENCE"
+	Cloze           QuestionType = "CLOZE"
+	TrueFalseWhy    QuestionType = "TRUE_FALSE_WHY"
+	PredictJustify  QuestionType = "PREDICT_JUSTIFY"
+	ConclusionDraw  QuestionType = "CONCLUSION_DRAW"
+	EvidenceHunt    QuestionType = "EVIDENCE_HUNT"
+	MCQCluster      QuestionType = "MCQ_CLUSTER"
+	DesignChallenge QuestionType = "DESIGN_CHALLENGE"
 )
 
 type QuestionLevel string
@@ -55,6 +70,10 @@ type Question struct {
 	Preamble     *string       `json:"-"`
 	KeyConcepts  []string      `json:"-"`
 	Options      []MCQOption   `json:"options,omitempty"`
+	// Payload carries the full v12 type-specific structure (categories, pairs,
+	// blanks, sub_questions, rubric, answer keys, tags). It is server-side only
+	// and must be sanitized (see internal/qtypes.Sanitize) before serving.
+	Payload json.RawMessage `json:"-"`
 }
 
 type MCQOption struct {
@@ -74,6 +93,9 @@ type ActiveQuestion struct {
 	RecallGuide *string           `json:"recallGuide,omitempty"`
 	Preamble    *string           `json:"preamble,omitempty"`
 	Options     []ActiveMCQOption `json:"options,omitempty"`
+	// Payload is the answer-key-stripped v12 structure safe to send to the client
+	// (see internal/qtypes.Sanitize). Present for non-legacy-MCQ types.
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 type ActiveMCQOption struct {
@@ -206,7 +228,11 @@ type SubmitAnswerReq struct {
 	QuestionType QuestionType `json:"questionType"`
 	ChosenOption *string      `json:"chosenOption,omitempty"` // MCQ
 	StudentText  *string      `json:"studentText,omitempty"`  // open-ended
-	ElapsedMs    *int         `json:"elapsedMs,omitempty"`    // time-on-task (ms)
+	// AnswerPayload carries structured answers for v12 types that aren't a single
+	// option or free text: classify buckets, match pairs, sequence order, cloze
+	// blank fills, mcq_cluster sub-answers, or a two-step {verdict, reason}.
+	AnswerPayload json.RawMessage `json:"answerPayload,omitempty"`
+	ElapsedMs     *int            `json:"elapsedMs,omitempty"` // time-on-task (ms)
 }
 
 type CompleteSessionReq struct {
