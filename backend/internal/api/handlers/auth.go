@@ -283,13 +283,13 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	if err := db.QueryRow(r.Context(), `
 		SELECT id FROM students WHERE user_id = $1
 	`, userID).Scan(&studentID); err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		serverErr(w, fmt.Errorf("login: lookup student for user %s: %w", userID, err))
 		return
 	}
 
 	access, refreshPlain, refreshHash, err := mintTokens(userID, studentID)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		serverErr(w, fmt.Errorf("login: mint tokens: %w", err))
 		return
 	}
 	db.Exec(r.Context(), `
