@@ -20,6 +20,8 @@ services:
         value: https://brainmaps.in,https://www.brainmaps.in,https://brainmaps-dun.vercel.app,https://brainmaps-ani1238s-projects.vercel.app,https://brainmaps-ani1238-ani1238s-projects.vercel.app
       - key: DATABASE_URL
         sync: false
+      - key: JWT_SECRET
+        sync: false
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
