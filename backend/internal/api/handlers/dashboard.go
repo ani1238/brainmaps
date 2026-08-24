@@ -147,7 +147,7 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 		resp.Mastery.NotStarted += total - attempted
 	}
 	rows.Close()
-	for _, k := range []string{"evs", "science", "social_science", "english"} {
+	for _, k := range []string{"evs", "science", "social_science", "english", "chemistry"} {
 		if s, ok := tmp[k]; ok {
 			resp.Subjects = append(resp.Subjects, s)
 		}
