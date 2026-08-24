@@ -134,6 +134,11 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
       pct: total > 0 ? Math.round((mastered / total) * 100) : 0,
     };
   }
+  // Once the dashboard responds, only show subjects available for this
+  // learner's grade and board. Keep the full list during the initial load.
+  const visibleSubjects = subjects.length > 0
+    ? SUBJECTS.filter(s => subjectProgress(s.key).total > 0)
+    : SUBJECTS;
 
   // Measure the actual container so the orbit centers and scales to any screen
   // (the component is also given sensible defaults for SSR / first paint).
@@ -305,7 +310,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
             <h1 className="text-2xl font-extrabold" style={{ color: '#1c1917' }}>Pick a subject to explore!</h1>
           </div>
           <div className="text-xs" style={{ color: '#78716c' }}>
-            {SUBJECTS.length} {SUBJECTS.length === 1 ? 'subject' : 'subjects'} · {queueCounts.revise} due to check
+            {visibleSubjects.length} {visibleSubjects.length === 1 ? 'subject' : 'subjects'} · {queueCounts.revise} due to check
           </div>
         </div>
       )}
@@ -322,8 +327,8 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
             {/* orbit rings */}
             <circle cx={orbitCx} cy={cy} r={rSubject} fill="none" stroke="rgba(168,162,158,0.3)" strokeWidth={1} strokeDasharray="4 6" />
             {/* connection lines */}
-            {SUBJECTS.map((s, i) => {
-              const pos = polarPos(orbitCx, cy, rSubject, i, SUBJECTS.length);
+            {visibleSubjects.map((s, i) => {
+              const pos = polarPos(orbitCx, cy, rSubject, i, visibleSubjects.length);
               return (
                 <line key={s.key}
                   x1={orbitCx} y1={cy} x2={pos.x} y2={pos.y}
@@ -398,6 +403,7 @@ export function BrainMap({ width = 1200, height = 900 }: { width?: number; heigh
         <SubjectNodes
           key={`subj-${navKey}`}
           cx={orbitCx} cy={cy} r={rSubject} scale={nodeScale}
+          subjects={visibleSubjects}
           progressFor={subjectProgress}
           onSelect={zoomToSubject}
         />
@@ -571,15 +577,16 @@ function CenterNode({
   return null;
 }
 
-function SubjectNodes({ cx, cy, r, scale = 1, progressFor, onSelect }: {
+function SubjectNodes({ cx, cy, r, scale = 1, subjects, progressFor, onSelect }: {
   cx: number; cy: number; r: number; scale?: number;
+  subjects: typeof SUBJECTS;
   progressFor: (key: string) => { pct: number; mastered: number; total: number; inProgress: number };
   onSelect: (key: string, label: string) => void;
 }) {
   return (
     <>
-      {SUBJECTS.map((s, i) => {
-        const { x, y } = polarPos(cx, cy, r, i, SUBJECTS.length);
+      {subjects.map((s, i) => {
+        const { x, y } = polarPos(cx, cy, r, i, subjects.length);
         const prog = progressFor(s.key);
         const hasDue = prog.inProgress > 0;
         const subtitle = prog.total > 0

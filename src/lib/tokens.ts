@@ -22,9 +22,11 @@ export const COLORS = {
   ghost: '#a8a29e',
 
   // Subject
+  evs:           '#15803d',
   science:       '#0d9488',
   socialScience: '#7c3aed',
   english:       '#e11d48',
+  chemistry:     '#2563eb',
   // Legacy (kept for dummy data / dashboard)
   history: '#d97706',
   geo: '#059669',
@@ -50,9 +52,11 @@ export const SUBJECTS: {
   color: string;
   icon: string;
 }[] = [
+  { key: 'evs',            label: 'Environmental Studies', letter: 'EVS', color: COLORS.evs,           icon: '🌱' },
   { key: 'science',        label: 'Science',        letter: 'S',  color: COLORS.science,       icon: '🔬' },
   { key: 'social_science', label: 'Social Science',  letter: 'SS', color: COLORS.socialScience, icon: '🌍' },
   { key: 'english',        label: 'English',         letter: 'E',  color: COLORS.english,       icon: '📖' },
+  { key: 'chemistry',      label: 'Chemistry',       letter: 'C',  color: COLORS.chemistry,     icon: '🧪' },
 ];
 
 export const SUBJECT_MAP = Object.fromEntries(
