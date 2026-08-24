@@ -1,0 +1,34 @@
+# render.yaml — BrainMaps Go API (free-tier alternative to Fly.io)
+# Deploy: connect this repo in the Render dashboard, choose "Blueprint",
+# point it at this file. Secrets (marked sync: false below) must be filled
+# in via the Render dashboard after the service is created — never commit
+# real values here.
+
+services:
+  - type: web
+    name: brainmaps-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: singapore
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: ALLOWED_ORIGINS
+        value: https://brainmaps.in,https://www.brainmaps.in,https://brainmaps-dun.vercel.app,https://brainmaps-ani1238s-projects.vercel.app,https://brainmaps-ani1238-ani1238s-projects.vercel.app
+      - key: DATABASE_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.4-mini

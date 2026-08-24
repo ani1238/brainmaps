@@ -152,9 +152,9 @@ type authResp struct {
 	Role         string `json:"role,omitempty"`
 }
 
-// normalizeGradeBoard clamps grade to 3..7 (default 6) and board to CBSE/ICSE.
+// normalizeGradeBoard clamps grade to 3..9 (default 6) and board to CBSE/ICSE.
 func normalizeGradeBoard(grade int, board string) (int, string) {
-	if grade < 3 || grade > 7 {
+	if grade < 3 || grade > 9 {
 		grade = 6
 	}
 	board = strings.ToUpper(strings.TrimSpace(board))

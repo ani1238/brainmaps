@@ -50,6 +50,8 @@ func main() {
 	board := flag.String("board", "CBSE", "board")
 	grade := flag.Int("grade", 6, "grade")
 	chapterNumber := flag.Int("chapter-number", 1, "chapter number")
+	chapterName := flag.String("chapter-name", "", "chapter display name (defaults to JSON chapter)")
+	engineTypeFlag := flag.String("engine-type", "", "concept engine type (inferred from subject when omitted)")
 	dsn := flag.String("dsn", "", "Postgres DSN (defaults to DATABASE_URL)")
 	additive := flag.Bool("additive", false,
 		"augment an existing concept: leave its concepts/chapters row and any legacy "+
@@ -74,6 +76,14 @@ func main() {
 	must(json.Unmarshal(raw, &cf))
 	if cf.ConceptID == "" {
 		fatal("concept_id is empty")
+	}
+	resolvedChapterName := strings.TrimSpace(*chapterName)
+	if resolvedChapterName == "" {
+		resolvedChapterName = cf.Chapter
+	}
+	engineType := strings.TrimSpace(*engineTypeFlag)
+	if engineType == "" {
+		engineType = inferEngineType(*subject)
 	}
 
 	ctx := context.Background()
@@ -102,14 +112,10 @@ func main() {
 			INSERT INTO chapters (id, subject_key, board, grade, number, name, order_idx)
 			VALUES ($1,$2,$3,$4,$5,$6,$7)
 			ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
-			chapterID, *subject, *board, *grade, *chapterNumber, cf.Chapter, *chapterNumber)
+			chapterID, *subject, *board, *grade, *chapterNumber, resolvedChapterName, *chapterNumber)
 		must(err)
 
 		// concept (upsert)
-		engineType := "CONCEPTUAL"
-		if *subject == "english" {
-			engineType = "ENGLISH"
-		}
 		meta, _ := json.Marshal(map[string]any{
 			"engine_version":   cf.EngineVersion,
 			"source_section":   cf.SourceSection,
@@ -141,13 +147,16 @@ func main() {
 		must(err)
 	}
 
-	// questions + station_config — replace for this concept. In additive mode only
-	// v12 rows (non-empty payload) are cleared, so pre-existing legacy questions
-	// (payload='{}', graded via mcq_options / flat columns) are left intact.
+	// Questions + station_config — replace the active pool for this concept.
+	// Historical session_answers reference question IDs, so old rows must not be
+	// deleted. Retire them and reactivate/upsert every item in the incoming bank.
+	// In additive mode, legacy payload-less rows remain active.
 	if *additive {
-		_, err = tx.Exec(ctx, `DELETE FROM questions WHERE concept_id=$1 AND payload <> '{}'::jsonb`, cf.ConceptID)
+		_, err = tx.Exec(ctx, `
+			UPDATE questions SET is_active=false
+			WHERE concept_id=$1 AND payload <> '{}'::jsonb`, cf.ConceptID)
 	} else {
-		_, err = tx.Exec(ctx, `DELETE FROM questions WHERE concept_id=$1`, cf.ConceptID)
+		_, err = tx.Exec(ctx, `UPDATE questions SET is_active=false WHERE concept_id=$1`, cf.ConceptID)
 	}
 	must(err)
 	_, err = tx.Exec(ctx, `DELETE FROM station_config WHERE concept_id=$1`, cf.ConceptID)
@@ -166,16 +175,29 @@ func main() {
 		must(err)
 
 		for idx, item := range sv.Items {
-			id, _ := item["id"].(string)
+			sourceID, _ := item["id"].(string)
 			typ, _ := item["type"].(string)
-			if id == "" || typ == "" {
+			if sourceID == "" || typ == "" {
 				fatal("item missing id/type in station " + st)
 			}
+			id := globallyUniqueQuestionID(cf.ConceptID, sourceID)
+			item["id"] = id
 			payload, err := json.Marshal(item)
 			must(err)
 			_, err = tx.Exec(ctx, `
-				INSERT INTO questions (id, concept_id, type, level, text, explanation, key_concepts, order_idx, payload)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+				INSERT INTO questions
+					(id, concept_id, type, level, text, explanation, key_concepts, order_idx, payload, is_active)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true)
+				ON CONFLICT (id) DO UPDATE SET
+					concept_id = EXCLUDED.concept_id,
+					type = EXCLUDED.type,
+					level = EXCLUDED.level,
+					text = EXCLUDED.text,
+					explanation = EXCLUDED.explanation,
+					key_concepts = EXCLUDED.key_concepts,
+					order_idx = EXCLUDED.order_idx,
+					payload = EXCLUDED.payload,
+					is_active = true`,
 				id, cf.ConceptID, dbType(typ), level, displayText(item),
 				strPtr(item, "explanation"), keyConcepts(item), idx, payload)
 			must(err)
@@ -190,6 +212,31 @@ func main() {
 
 // dbType maps a lowercase JSON item type to the uppercase questions.type enum.
 func dbType(t string) string { return strings.ToUpper(t) }
+
+func globallyUniqueQuestionID(conceptID, sourceID string) string {
+	if strings.HasPrefix(sourceID, conceptID) {
+		return sourceID
+	}
+	return conceptID + "__" + sourceID
+}
+
+func inferEngineType(subject string) string {
+	switch subject {
+	case "english_vocab":
+		return "ENGLISH_VOCAB"
+	case "english_grammar":
+		return "ENGLISH_GRAMMAR"
+	case "english_lit":
+		return "ENGLISH_LITERATURE"
+	case "english_writing":
+		return "ENGLISH_WRITING"
+	case "english_rc":
+		return "ENGLISH_COMPREHENSION"
+	case "english":
+		fatal("subject english is ambiguous; use an english_* track subject")
+	}
+	return "CONCEPTUAL"
+}
 
 // displayText picks the most prompt-like field for the flat questions.text column
 // (used by search / legacy review); the full structure lives in payload.

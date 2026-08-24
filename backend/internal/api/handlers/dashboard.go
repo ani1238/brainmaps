@@ -102,7 +102,7 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 		NeedsAttention: []ConceptNote{},
 	}
 
-	// ── 1. Per-subject rollup (only the 3 navigable subjects; english_* → english) ──
+	// ── 1. Per-subject rollup (english_* → english) ─────────────────────────
 	rows, err := db.Query(ctx, `
 		SELECT
 		  CASE WHEN c.subject_key LIKE 'english%' THEN 'english' ELSE c.subject_key END AS subj,
@@ -115,7 +115,9 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 		  COALESCE(SUM(cp.ema_score), 0) AS ema_sum
 		FROM concepts c
 		LEFT JOIN concept_progress cp ON cp.concept_id = c.id AND cp.student_id = $1
-		WHERE c.subject_key IN ('science','social_science') OR c.subject_key LIKE 'english%'
+		WHERE (c.subject_key IN ('evs','science','social_science','chemistry') OR c.subject_key LIKE 'english%')
+		  AND c.grade = (SELECT grade FROM students WHERE id = $1)
+		  AND c.board = (SELECT board FROM students WHERE id = $1)
 		GROUP BY subj
 	`, studentID)
 	if err != nil {
@@ -145,7 +147,7 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 		resp.Mastery.NotStarted += total - attempted
 	}
 	rows.Close()
-	for _, k := range []string{"science", "social_science", "english"} {
+	for _, k := range []string{"evs", "science", "social_science", "english"} {
 		if s, ok := tmp[k]; ok {
 			resp.Subjects = append(resp.Subjects, s)
 		}
@@ -208,7 +210,9 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 		SELECT d.concept_id, c.name, (d.latest - d.prev) AS delta
 		FROM deltas d JOIN concepts c ON c.id = d.concept_id
 		WHERE d.prev IS NOT NULL AND d.latest > d.prev
-		  AND (c.subject_key IN ('science','social_science') OR c.subject_key LIKE 'english%')
+		  AND (c.subject_key IN ('evs','science','social_science') OR c.subject_key LIKE 'english%')
+		  AND c.grade = (SELECT grade FROM students WHERE id = $1)
+		  AND c.board = (SELECT board FROM students WHERE id = $1)
 		ORDER BY delta DESC LIMIT 3
 	`, studentID)
 	if err == nil {
@@ -228,7 +232,9 @@ func GetDashboard(w http.ResponseWriter, r *http.Request) {
 		        OR cp.strengthen_state='needs_fixing') AS flagged
 		FROM concept_progress cp JOIN concepts c ON c.id = cp.concept_id
 		WHERE cp.student_id = $1
-		  AND (c.subject_key IN ('science','social_science') OR c.subject_key LIKE 'english%')
+		  AND (c.subject_key IN ('evs','science','social_science') OR c.subject_key LIKE 'english%')
+		  AND c.grade = (SELECT grade FROM students WHERE id = $1)
+		  AND c.board = (SELECT board FROM students WHERE id = $1)
 		  AND (cp.l1_state='needs_fixing' OR cp.l2_state='needs_fixing' OR cp.l3_state='needs_fixing'
 		       OR cp.strengthen_state='needs_fixing' OR cp.ema_score < 0.45)
 		ORDER BY cp.ema_score ASC LIMIT 3
