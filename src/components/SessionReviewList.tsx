@@ -21,10 +21,45 @@ const Q_TYPE_LABEL: Record<string, string> = {
   CONTEXT_CLUE:          'Use the clues',
 };
 
-function ReviewCard({ item }: { item: SessionReviewAnswer }) {
+function scoreColorFor(item: SessionReviewAnswer): string {
+  const score = item.score ?? (item.isCorrect ? 1 : 0);
+  return score >= 0.75 ? '#22c55e' : score >= 0.45 ? '#f97316' : '#ef4444';
+}
+
+function jumpTo(questionId: string) {
+  document.getElementById(`review-${questionId}`)
+    ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// One dot per question — an at-a-glance right/wrong pattern without opening
+// any card. Tapping a dot scrolls that card into view.
+function ResultStrip({ answers }: { answers: SessionReviewAnswer[] }) {
+  if (answers.length < 2) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 px-1 pb-1" role="list" aria-label="Question results">
+      {answers.map((item, i) => {
+        const color = scoreColorFor(item);
+        return (
+          <button
+            key={item.questionId}
+            onClick={() => jumpTo(item.questionId)}
+            title={`Question ${i + 1}`}
+            aria-label={`Jump to question ${i + 1}`}
+            className="w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center flex-none"
+            style={{ background: `${color}22`, border: `1.5px solid ${color}`, color }}
+          >
+            {i + 1}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReviewCard({ item, index, total }: { item: SessionReviewAnswer; index: number; total: number }) {
   const [showAnswer, setShowAnswer] = useState(false);
   const score = item.score ?? (item.isCorrect ? 1 : 0);
-  const scoreColor = score >= 0.75 ? '#22c55e' : score >= 0.45 ? '#f97316' : '#ef4444';
+  const scoreColor = scoreColorFor(item);
   const scoreLabel = item.isCorrect != null
     ? item.isCorrect ? 'Correct' : 'Needs another look'
     : `${Math.round(score * 100)}%`;
@@ -33,7 +68,8 @@ function ReviewCard({ item }: { item: SessionReviewAnswer }) {
 
   return (
     <div
-      className="rounded-2xl overflow-hidden text-left"
+      id={`review-${item.questionId}`}
+      className="rounded-2xl overflow-hidden text-left scroll-mt-4"
       style={{ border: `1.5px solid ${scoreColor}30`, background: 'rgba(255,255,255,0.7)' }}
     >
       {/* Header */}
@@ -45,15 +81,16 @@ function ReviewCard({ item }: { item: SessionReviewAnswer }) {
             {Q_TYPE_LABEL[item.questionType] ?? item.questionType}
           </span>
         </div>
-        <span className="text-[11px] font-bold" style={{ color: scoreColor }}>{scoreLabel}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold" style={{ color: '#a8a29e' }}>{index + 1} / {total}</span>
+          <span className="text-[11px] font-bold" style={{ color: scoreColor }}>{scoreLabel}</span>
+        </div>
       </div>
 
       <div className="px-4 py-3 space-y-3">
-        {/* Question */}
+        {/* Question — shown in full; these are short enough to always read whole */}
         <p className="text-xs font-semibold leading-snug" style={{ color: '#78716c' }}>
-          {item.questionText.length > 120
-            ? item.questionText.slice(0, 117) + '…'
-            : item.questionText}
+          {item.questionText}
         </p>
 
         {/* Student's answer */}
@@ -62,10 +99,8 @@ function ReviewCard({ item }: { item: SessionReviewAnswer }) {
             <div className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: '#a8a29e' }}>
               Your answer
             </div>
-            <p className="text-xs leading-relaxed italic" style={{ color: '#44403c' }}>
-              &ldquo;{item.studentAnswer.length > 300
-                ? item.studentAnswer.slice(0, 297) + '…'
-                : item.studentAnswer}&rdquo;
+            <p className="text-xs leading-relaxed italic whitespace-pre-wrap" style={{ color: '#44403c' }}>
+              &ldquo;{item.studentAnswer}&rdquo;
             </p>
           </div>
         )}
@@ -126,9 +161,13 @@ function ReviewCard({ item }: { item: SessionReviewAnswer }) {
 // SessionReviewList renders every answer of a completed session with its
 // grading feedback. Shared by the sharpen results screen and the reports page.
 export function SessionReviewList({ review }: { review: SessionReview }) {
+  const total = review.answers.length;
   return (
     <div className="w-full text-left space-y-3">
-      {review.answers.map(item => <ReviewCard key={item.questionId} item={item} />)}
+      <ResultStrip answers={review.answers} />
+      {review.answers.map((item, i) => (
+        <ReviewCard key={item.questionId} item={item} index={i} total={total} />
+      ))}
     </div>
   );
 }
