@@ -567,6 +567,12 @@ export interface SessionReviewAnswer {
   correctAnswer?: string;
   explanation?: string;
   answerGuide?: string;
+  // v12 only: the question's full structure WITH answer keys (options[].correct,
+  // pairs, correct_order, blanks[].answer, …) and the student's structured
+  // answer, in the same shape submitted during the session. Absent for legacy
+  // (pre-v12) questions, which only have the flattened fields above.
+  payload?: Record<string, unknown>;
+  answerPayload?: Record<string, unknown>;
 }
 
 export interface SessionReview {

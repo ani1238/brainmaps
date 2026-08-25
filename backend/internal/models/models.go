@@ -268,6 +268,13 @@ type SessionReviewAnswer struct {
 	CorrectAnswer string       `json:"correctAnswer,omitempty"`
 	Explanation   string       `json:"explanation,omitempty"`
 	AnswerGuide   string       `json:"answerGuide,omitempty"`
+	// Payload is the question's full v12 structure (options, pairs, blanks, …)
+	// WITH answer keys still included — safe here since this is only served
+	// after the session is complete. Empty for legacy (pre-v12) questions.
+	Payload json.RawMessage `json:"payload,omitempty"`
+	// AnswerPayload is the student's structured answer for v12 objective types
+	// that aren't a single chosen option (match, sequence, classify, …).
+	AnswerPayload json.RawMessage `json:"answerPayload,omitempty"`
 }
 
 // ConceptWithProgress is returned by the Brain Map endpoint

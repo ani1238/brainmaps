@@ -154,7 +154,9 @@ func loadSessionReview(ctx context.Context, sessionID string) (models.SessionRev
 			COALESCE(correct.text, ''),
 			COALESCE(q.explanation, ''),
 			COALESCE(q.rubric_hint, ''),
-			COALESCE(q.key_concepts, '{}'::text[])
+			COALESCE(q.key_concepts, '{}'::text[]),
+			CASE WHEN q.payload = '{}'::jsonb THEN NULL ELSE q.payload END,
+			sa.answer_payload
 		FROM session_answers sa
 		JOIN questions q ON q.id = sa.question_id
 		LEFT JOIN mcq_options chosen
@@ -195,6 +197,8 @@ func loadSessionReview(ctx context.Context, sessionID string) (models.SessionRev
 			&explanation,
 			&rubricHint,
 			&keyConcepts,
+			&answer.Payload,
+			&answer.AnswerPayload,
 		); err != nil {
 			return models.SessionReview{}, false, err
 		}

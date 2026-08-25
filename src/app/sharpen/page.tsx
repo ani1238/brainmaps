@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { GridBackground } from '@/components/GridBackground';
 import { LeftRail } from '@/components/LeftRail';
 import { QuestionScreen } from '@/components/QuestionScreen';
-import { SessionReviewList } from '@/components/SessionReviewList';
+import { ReviewCarousel } from '@/components/ReviewCarousel';
 import type { AnswerPayload } from '@/components/QuestionScreen';
 import { COLORS, subjectDisplay, MASTERY_MAP } from '@/lib/tokens';
 import { CHAPTER_DATA, CONCEPT_BY_ID, CONCEPT_DETAILS, DEFAULT_CONCEPT_DETAIL } from '@/data/dummy';
@@ -515,7 +515,7 @@ function SharpenContent() {
             )}
             {!aiStillGrading && reviewOpen && review && (
               <div className="mb-5">
-                <SessionReviewList review={review} />
+                <ReviewCarousel review={review} />
               </div>
             )}
 

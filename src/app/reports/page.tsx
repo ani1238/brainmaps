@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { GridBackground } from '@/components/GridBackground';
 import { LeftRail } from '@/components/LeftRail';
-import { SessionReviewList } from '@/components/SessionReviewList';
+import { ReviewCarousel } from '@/components/ReviewCarousel';
 import { COLORS, STATION_LABELS } from '@/lib/tokens';
 import type { QuestionLevel } from '@/types';
 import {
@@ -130,7 +130,7 @@ function ReportsContent() {
                       {reviewError && (
                         <p className="text-sm px-1 py-2" style={{ color: '#ef4444' }}>{reviewError}</p>
                       )}
-                      {!reviewLoading && !reviewError && review && <SessionReviewList review={review} />}
+                      {!reviewLoading && !reviewError && review && <ReviewCarousel review={review} />}
                     </div>
                   )}
                 </div>
